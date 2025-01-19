@@ -4,16 +4,10 @@
 Main File to Fetch NSE India Options Chain Data
 """
 
-
-import time
 import requests
-
 import datetime as dt
 
-from tqdm import tqdm as TQ
-
 import pandas as pd
-import xlwings as xw
 
 URI_HEADER = {
     "accept-language" : "en-US,en;q=0.9",
@@ -54,7 +48,7 @@ def fetchdoc(symbol : str, expiry : str | dt.date) -> pd.DataFrame:
     try:
         data = session.json()["records"]["data"]
     except Exception as e:
-        print(f"{time.ctime()} : Failed to Fetch Data::\n\t{e}")
+        print(f"{dt.datetime.now()} : Failed to Fetch Data::\n\t{e}")
 
     ocdata = []
     for item in data:
