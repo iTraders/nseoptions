@@ -26,7 +26,7 @@ def fetchdoc(symbol : str, expiry : str | dt.date) -> pd.DataFrame:
     return the data for the selected symbol (can be either an index or
     a stock symbol) and for a given expiry date.
 
-    :type  symbol:
+    :type  symbol: str
     :param symbol: Symbol to fetch the data from NSE India website.
         The symbol should be upper case (or converted internally), as
         available in https://www.nseindia.com/option-chain data.
