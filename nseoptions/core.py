@@ -108,10 +108,19 @@ def fetchdoc(symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs
                 pass
     
     frame = pd.DataFrame(ocdata) # all the data are in the dataframe
-    frame = frame[
-        (frame["expiryDate"] == expiry) &
-        (frame["strikePrice"].between(s, f))
-    ]
+
+    # first we filter for the required expiry date, and then
+    # we get the total put call ratio for the given expiry, then filter date
+    frame = frame[frame["expiryDate"] == expiry]
+    tot_oi_ce = frame[frame["instrumentType"] == "CE"]["openInterest"].sum()
+    tot_oi_pe = frame[frame["instrumentType"] == "PE"]["openInterest"].sum()
+    global_pcr = tot_oi_pe / tot_oi_ce # better to get for the overall
+
+    # also find the total volume traded for the given expiry for ce/pe
+    tot_vol_ce = frame[frame["instrumentType"] == "CE"]["totalTradedVolume"].sum()
+    tot_vol_pe = frame[frame["instrumentType"] == "PE"]["totalTradedVolume"].sum()
+
+    frame = frame[frame["strikePrice"].between(s, f)]
 
     # since we already know the expiry and symbol, we can delete them
     # also identifier is not required as we will not be placing order
@@ -120,6 +129,14 @@ def fetchdoc(symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs
     # now we can safely return the option chain data like in nse
     ce = frame[frame["instrumentType"] == "CE"]
     pe = frame[frame["instrumentType"] == "PE"]
+
+    # near atm strike is also a option for pcr calculation, better avoid
+    near_oi_ce = ce["openInterest"].sum()
+    near_oi_pe = pe["openInterest"].sum()
+
+    # near atm volume may also be a good indicator for tracking
+    near_vol_ce = ce["totalTradedVolume"].sum()
+    near_vol_pe = pe["totalTradedVolume"].sum()
 
     opchain = pd.merge(
         ce, pe, how = "inner", on = "strikePrice", suffixes = ("_ce", "_pe")
@@ -138,4 +155,19 @@ def fetchdoc(symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs
     pecols_ = [f"{col}_pe" for col in columns][::-1]
     opchain = opchain[cecols_ + ["strikePrice"] + pecols_]
 
-    return response, frame, opchain, timestamp, underlying, atm
+    # return other important response as a dictionary data
+    # this can be written as a value where required in the future
+    essentials = dict(
+        symbol = symbol, expiry = expiry, timestamp = timestamp,
+        underlying = underlying, atm = atm,
+
+        # return for pcr related calculation
+        global_pcr = global_pcr, tot_oi_ce = tot_oi_ce, tot_oi_pe = tot_oi_pe,
+        near_pcr = near_oi_pe / near_oi_ce, near_oi_ce = near_oi_ce, near_oi_pe = near_oi_pe,
+
+        # return for volume related calculation
+        tot_vol_ce = tot_vol_ce, tot_vol_pe = tot_vol_pe,
+        near_vol_ce = near_vol_ce, near_vol_pe = near_vol_pe
+    )
+
+    return response, frame, opchain, essentials
