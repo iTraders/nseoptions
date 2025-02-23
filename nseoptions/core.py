@@ -18,7 +18,7 @@ URI_HEADER = {
 NSE_OPTION_CHAIN_URI = "https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
 
 
-def fetchdoc(symbol : str, expiry : str | dt.date, **kwargs) -> pd.DataFrame:
+def fetchdoc(symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs) -> pd.DataFrame:
     """
     Fetch the Option Chain Data for a Symbol and Expiry
 
@@ -35,6 +35,10 @@ def fetchdoc(symbol : str, expiry : str | dt.date, **kwargs) -> pd.DataFrame:
     :param expiry: A valid expiration date of the given symbol. If the
         date is an instance of string the it must be of the date style
         :attr:`%d-%b-%Y` or can be a date.
+
+    :type  nstrikes: int
+    :param nstrikes: Number of strike prices above and below the ATM
+        to be fetched from the data. Default is 20.
     
     Keyword Arguments
     -----------------
@@ -56,8 +60,20 @@ def fetchdoc(symbol : str, expiry : str | dt.date, **kwargs) -> pd.DataFrame:
         headers = URI_HEADER
     )
 
+    # ? default multiple may change over time, but for now it is fixed
+    default_multiple = dict(
+        NIFTY = 50,
+        BANKNIFTY = 100,
+        FINNIFTY = 50,
+        NIFTYNXT50 = 100,
+        MIDCPNIFTY = 25
+    )
+
     # ? keyword arguments defination and default control settings
     verbose = kwargs.get("verbose", True)
+    multiple = kwargs.get(
+        "multiple", default_multiple.get(symbol, 50)
+    )
 
     try:
         response = session.json()
@@ -67,10 +83,16 @@ def fetchdoc(symbol : str, expiry : str | dt.date, **kwargs) -> pd.DataFrame:
         timestamp = response["records"]["timestamp"]
         underlying = response["records"]["underlyingValue"]
 
+        # ? calculate atm strike price, and return smaller dataframe
+        atm = round(underlying / multiple) * multiple
+        s, f = atm - nstrikes * multiple, atm + nstrikes * multiple
+
         if verbose:
             print(f"{dt.datetime.now()} : Data Fetched for `{symbol}`")
             print(f"  >> Underlying Value   : ₹ {underlying:,.2f}")
             print(f"  >> Response Timestamp : {timestamp}")
+            print(f"  >> ATM Strike Price   : ₹ {atm:,.2f}")
+            print(f"  >> Strike Price Range : ₹ {s:,.2f} - ₹ {f:,.2f}")
 
     except Exception as e:
         print(f"{dt.datetime.now()} : Failed to Fetch Data::\n\t{e}")
@@ -85,5 +107,14 @@ def fetchdoc(symbol : str, expiry : str | dt.date, **kwargs) -> pd.DataFrame:
             else:
                 pass
     
-    frame = pd.DataFrame(ocdata)
-    return frame
+    frame = pd.DataFrame(ocdata) # all the data are in the dataframe
+    frame = frame[
+        (frame["expiryDate"] == expiry) &
+        (frame["strikePrice"].between(s, f))
+    ]
+
+    # since we already know the expiry and symbol, we can delete them
+    # also identifier is not required as we will not be placing order
+    frame.drop(columns = ["expiryDate", "underlying", "identifier"], inplace = True)
+
+    return response, frame
