@@ -10,8 +10,8 @@ import datetime as dt
 import pandas as pd
 
 URI_HEADER = {
-    "accept-language" : "en-US,en;q=0.9",
-    "accept-encoding" : "gzip, deflate, br",
+    "accept-language" : "en-US,en;q=0.9,en-IN;q=0.8",
+    "accept-encoding" : "gzip, deflate, br, zstd",
     "user-agent" : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36"
 }
 
