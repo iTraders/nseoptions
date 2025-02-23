@@ -115,6 +115,27 @@ def fetchdoc(symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs
 
     # since we already know the expiry and symbol, we can delete them
     # also identifier is not required as we will not be placing order
-    frame.drop(columns = ["expiryDate", "underlying", "identifier"], inplace = True)
+    frame.drop(columns = ["expiryDate", "underlying", "identifier", "underlyingValue"], inplace = True)
 
-    return response, frame
+    # now we can safely return the option chain data like in nse
+    ce = frame[frame["instrumentType"] == "CE"]
+    pe = frame[frame["instrumentType"] == "PE"]
+
+    opchain = pd.merge(
+        ce, pe, how = "inner", on = "strikePrice", suffixes = ("_ce", "_pe")
+    )
+
+    opchain.drop(columns = ["instrumentType_ce", "instrumentType_pe"], inplace = True)
+
+    # mimic and return the columns as in the nse option chain
+    columns = [
+        "openInterest", "changeinOpenInterest", "pchangeinOpenInterest",
+        "totalTradedVolume", "impliedVolatility", "lastPrice", "change", "pChange",
+        "totalBuyQuantity", "totalSellQuantity", "bidQty", "bidprice", "askQty", "askPrice"
+    ]
+
+    cecols_ = [f"{col}_ce" for col in columns]
+    pecols_ = [f"{col}_pe" for col in columns][::-1]
+    opchain = opchain[cecols_ + ["strikePrice"] + pecols_]
+
+    return response, frame, opchain, timestamp, underlying, atm
