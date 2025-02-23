@@ -15,5 +15,11 @@ module aims to fetch and parse the data to be used in other projects.
 # ? https://python-semver.readthedocs.io/en/latest/advanced/convert-pypi-to-semver.html
 __version__ = "v0.0.1.dev0"
 
+# ? register root of the package, this is required to import config
+import os
+
+ROOT = os.path.abspath(os.path.dirname(__file__))
+CONFIG = os.path.join(ROOT, "config.yaml")
+
 # init-time options registrations
 from nseoptions.core import fetchdoc
