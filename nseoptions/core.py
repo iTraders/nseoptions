@@ -4,10 +4,14 @@
 Main File to Fetch NSE India Options Chain Data
 """
 
+import yaml
+
 import requests
 import datetime as dt
 
 import pandas as pd
+
+from nseoptions import CONFIG
 
 URI_HEADER = {
     "accept-language" : "en-US,en;q=0.9,en-IN;q=0.8",
@@ -18,13 +22,17 @@ URI_HEADER = {
 NSE_OPTION_CHAIN_URI = "https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
 
 
-def fetchdoc(symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs) -> pd.DataFrame:
+class NSEOptionChain:
     """
-    Fetch the Option Chain Data for a Symbol and Expiry
+    National Stock Exchange (NSE) Option Chain Data Extraction Module
 
-    The response from the public API is filtered to only select and
-    return the data for the selected symbol (can be either an index or
-    a stock symbol) and for a given expiry date.
+    The NSE Option Chain is a free to use data source to analyze the
+    Indian option chain for various symbols. The details of usage and
+    terms and condition are available at the NSE India website.
+
+    The core function aims to fetch the data for a particular symbol
+    or an index for a said expiration date. In addition, the module
+    returns only relevant (near ATM) strike prices for the analysis.
 
     :type  symbol: str
     :param symbol: Symbol to fetch the data from NSE India website.
@@ -50,8 +58,74 @@ def fetchdoc(symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs
 
         * **verbose** (*bool*) - Print the debug and/or other relevant
             information while fetching the data. Default is True.
+
+        * **multiple** (*int*) - The multiple of the strike price for
+            a symbol or an index value. The default value is set for
+            the indexes like NIFTY, BANKNIFTY, etc. To set the multiple
+            for other symbols set the value, defaults to 50.
     """
 
+    def __init__(self, symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs):
+        self.symbol = symbol
+
+
+    def setconfig(self, file : str = CONFIG, type : str = "index", **kwargs) -> dict:
+        """
+        Configuration Data for the NSE Option Chain Module
+
+        The default configuration is stored under the `config` folder
+        at the base of the module. However, the user can set and update
+        any part of the configuration by passing the file path or
+        passing the individual values.
+
+        :type  file: str
+        :param file: The file path to the configuration file. The file
+            should be a YAML file with the required configuration.
+
+        :type  type: str
+        :param type: The type of the configuration to be fetched. The
+            default is `index` for the index options chain data. The
+            other option is `stock` for the stock options chain data.
+
+        Keyword Arguments
+        -----------------
+
+        The keyword arguments are defined to update a part of the
+        configuration value. For example, if an end user wants to only
+        change the header value, then the user can pass the header which
+        will overwrite the default header section with the new value.
+
+            * **header** (*dict*) - The header information to be passed
+                while fetching the data from the NSE India website.
+
+            * **apiuri** (*str*) - The API URI to fetch the data from
+                the NSE India website. The default is set to None.
+        """
+
+        header = kwargs.get("header", None)
+        apiuri = kwargs.get("apiuri", None)
+
+        # todo: check if file exists, and file is not None
+        config = yaml.load(open(file, "r"), Loader = yaml.FullLoader)
+
+        # ? update any part of the configuration if passed by enduser
+        config["config"]["header"] = header if header else config["config"]["header"]
+
+        # ! set the global header for the model, will not change on run
+        self.URI_HEADER = config["config"]["header"]
+
+        # ! the global url for the model is two part, either use the
+        # default or set the new one as given by the end user argument
+        configuri = config["config"]["uri"]
+        self.NSE_API_URI = apiuri if apiuri else \
+            configuri["base"] + configuri["type"][type]
+
+        self.NSE_API_URI = self.NSE_API_URI.format(symbol = self.symbol)
+
+        return config # return everything for debugging, developer usage
+
+
+def fetchdoc(symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs) -> pd.DataFrame:
     expiry = expiry if isinstance(expiry, str) else expiry.strftime("%d-%b-%Y")
 
     # define session object, and try to fetch the JSON data

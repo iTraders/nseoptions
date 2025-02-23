@@ -16,3 +16,10 @@ config:
     # ! this value will periodically update as per the website - to check this::
     # open browser > inspect element > network tab > refresh the page > check the request headers
     user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36
+  
+  # option chain url for data scrapping/api usage
+  uri:
+    base: https://www.nseindia.com/api/
+    type:
+      index: "option-chain-indices?symbol={symbol}"
+      stock: "option-chain-equities?symbol={symbol}"
