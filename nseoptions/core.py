@@ -43,10 +43,6 @@ class NSEOptionChain:
     :param expiry: A valid expiration date of the given symbol. If the
         date is an instance of string the it must be of the date style
         :attr:`%d-%b-%Y` or can be a date.
-
-    :type  nstrikes: int
-    :param nstrikes: Number of strike prices above and below the ATM
-        to be fetched from the data. Default is 20.
     
     Keyword Arguments
     -----------------
@@ -63,11 +59,36 @@ class NSEOptionChain:
             a symbol or an index value. The default value is set for
             the indexes like NIFTY, BANKNIFTY, etc. To set the multiple
             for other symbols set the value, defaults to 50.
+
+        * **nstrikes** (*int*) - The number of strike prices above and
+            below the ATM to be fetched from the data. Default is 20.
     """
 
-    def __init__(self, symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs):
+    def __init__(self, symbol : str, expiry : str | dt.date, **kwargs):
         self.symbol = symbol
         self.expiry = self.__set_expiry__(expiry)
+
+        # ? set the keyword arguments as class attributes
+        self.nstrikes = kwargs.get("nstrikes", 20)
+        self.multiple = kwargs.get("multiple", self._multiples.get(symbol, 50))
+
+
+    @property
+    def _multiples(self) -> dict:
+        """
+        Multiple of the Strike Price for the Given Symbol
+
+        The function returns the multiple of the strike price for the
+        given symbol. The multiple is used to calculate the ATM strike
+        price and the range of strike prices to be fetched from the
+        NSE India website.
+
+        The default multiple is set for the indexes like NIFTY, BANKNIFTY,
+        etc. The user can set the multiple for other symbols using the
+        `multiple` keyword argument while initializing the class.
+        """
+
+        return dict(NIFTYNXT50 = 100, BANKNIFTY = 100, MIDCPNIFTY = 25)
 
 
     def setconfig(self, file : str = CONFIG, type : str = "index", **kwargs) -> dict:
