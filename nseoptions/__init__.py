@@ -19,7 +19,7 @@ __version__ = "v0.0.1.dev0"
 import os
 
 ROOT = os.path.abspath(os.path.dirname(__file__))
-CONFIG = os.path.join(ROOT, "config.yaml")
+CONFIG = os.path.join(ROOT, "config", "default.yaml")
 
 # init-time options registrations
-from nseoptions.core import fetchdoc
+from nseoptions import core # noqa: F401, F403 # pyright: ignore[reportMissingImports]
