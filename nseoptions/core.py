@@ -91,6 +91,29 @@ class NSEOptionChain:
         return dict(NIFTYNXT50 = 100, BANKNIFTY = 100, MIDCPNIFTY = 25)
 
 
+    @property
+    def session(self) -> requests.Session:
+        """
+        Session Object for the NSE Option Chain Data
+
+        The function returns a session object to fetch the data from the
+        NSE India website. The session object is used to fetch the data
+        from the website using the API URI.
+
+        The session object is created using the `requests` module and
+        the headers are set to mimic a browser request to the website.
+        """
+
+        return requests.Session().get(
+            self.NSE_API_URI, headers = self.URI_HEADER
+        )
+
+
+    @property
+    def response(self) -> dict:
+        return self.session.json()
+
+
     def setconfig(self, file : str = CONFIG, type : str = "index", **kwargs) -> dict:
         """
         Configuration Data for the NSE Option Chain Module
