@@ -18,7 +18,7 @@ URI_HEADER = {
 NSE_OPTION_CHAIN_URI = "https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
 
 
-def fetchdoc(symbol : str, expiry : str | dt.date) -> pd.DataFrame:
+def fetchdoc(symbol : str, expiry : str | dt.date, **kwargs) -> pd.DataFrame:
     """
     Fetch the Option Chain Data for a Symbol and Expiry
 
@@ -35,6 +35,17 @@ def fetchdoc(symbol : str, expiry : str | dt.date) -> pd.DataFrame:
     :param expiry: A valid expiration date of the given symbol. If the
         date is an instance of string the it must be of the date style
         :attr:`%d-%b-%Y` or can be a date.
+    
+    Keyword Arguments
+    -----------------
+
+    The keyword arguments are defined for additional controls, and it
+    is recommended to use the default settings (since the module is
+    currently under development and the keyword arguments aren't yet
+    fully tested).
+
+        * **verbose** (*bool*) - Print the debug and/or other relevant
+            information while fetching the data. Default is True.
     """
 
     expiry = expiry if isinstance(expiry, str) else expiry.strftime("%d-%b-%Y")
@@ -45,8 +56,22 @@ def fetchdoc(symbol : str, expiry : str | dt.date) -> pd.DataFrame:
         headers = URI_HEADER
     )
 
+    # ? keyword arguments defination and default control settings
+    verbose = kwargs.get("verbose", True)
+
     try:
-        data = session.json()["records"]["data"]
+        response = session.json()
+        data = response["records"]["data"]
+        
+        # ..versionadded:: 0.0.1.dev0 - response is stored for debug
+        timestamp = response["records"]["timestamp"]
+        underlying = response["records"]["underlyingValue"]
+
+        if verbose:
+            print(f"{dt.datetime.now()} : Data Fetched for `{symbol}`")
+            print(f"  >> Underlying Value   : ₹ {underlying:,.2f}")
+            print(f"  >> Response Timestamp : {timestamp}")
+
     except Exception as e:
         print(f"{dt.datetime.now()} : Failed to Fetch Data::\n\t{e}")
 
