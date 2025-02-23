@@ -67,6 +67,7 @@ class NSEOptionChain:
 
     def __init__(self, symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs):
         self.symbol = symbol
+        self.expiry = self.__set_expiry__(expiry)
 
 
     def setconfig(self, file : str = CONFIG, type : str = "index", **kwargs) -> dict:
@@ -123,6 +124,24 @@ class NSEOptionChain:
         self.NSE_API_URI = self.NSE_API_URI.format(symbol = self.symbol)
 
         return config # return everything for debugging, developer usage
+
+
+    def __set_expiry__(self, expiry : str | dt.date) -> str:
+        """
+        Set the Expiry Date for the Option Chain Data
+
+        The function is used to set the expiry date for the option chain
+        data. The expiry date can be a string or a date object. The date
+        is converted to a string in the format :attr:`%d-%b-%Y` for the
+        NSE India API.
+
+        :type  expiry: str or dt.date
+        :param expiry: A valid expiration date of the given symbol. If the
+            date is an instance of string the it must be of the date style
+            :attr:`%d-%b-%Y` or can be a date.
+        """
+
+        return expiry if isinstance(expiry, str) else expiry.strftime("%d-%b-%Y")
 
 
 def fetchdoc(symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs) -> pd.DataFrame:
