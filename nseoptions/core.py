@@ -4,10 +4,13 @@
 Main File to Fetch NSE India Options Chain Data
 """
 
+import time
 import yaml
 
 import requests
 import datetime as dt
+
+from tqdm import tqdm as TQ
 
 import pandas as pd
 
@@ -56,16 +59,13 @@ class NSEOptionChain:
             below the ATM to be fetched from the data. Default is 20.
     """
 
-    def __init__(self, symbol : str, expiry : str | dt.date, **kwargs):
-        self.symbol = symbol
-        self.expiry = self.__set_expiry__(expiry)
-
-        # ? set the keyword arguments as class attributes
-        self.multiple = kwargs.get("multiple", self._multiples.get(symbol, 50))
+    def __init__(self, symbol : str, multiple : int = None) -> None:
+        self.symbol = symbol.upper()
+        self.multiple = multiple or self.__default_multiples__.get(symbol, 50)
 
 
     @property
-    def _multiples(self) -> dict:
+    def __default_multiples__(self) -> dict:
         """
         Multiple of the Strike Price for the Given Symbol
 
@@ -79,11 +79,10 @@ class NSEOptionChain:
         `multiple` keyword argument while initializing the class.
         """
 
-        return dict(NIFTYNXT50 = 100, BANKNIFTY = 100, MIDCPNIFTY = 25)
+        return dict(BANKNIFTY = 100, MIDCPNIFTY = 25, NIFTYNXT50 = 100)
 
 
-    @property
-    def session(self) -> requests.Session:
+    def response(self, waittime : int = 10) -> dict:
         """
         Session Object for the NSE Option Chain Data
 
@@ -95,14 +94,21 @@ class NSEOptionChain:
         the headers are set to mimic a browser request to the website.
         """
 
-        return requests.Session().get(
+        session = requests.Session().get(
             self.NSE_API_URI, headers = self.URI_HEADER
         )
 
+        fetched = False
+        while not fetched:
+            try:
+                response = session.json()
 
-    @property
-    def response(self) -> dict:
-        return self.session.json()
+                fetched = True # exit the loop if json is fetched
+            except Exception as e:
+                print(f"{time.ctime()} : Failed to Fetch Data - {e}")
+                _ = [time.sleep(1) for _ in TQ(range(waittime), desc = "Retrying...")]
+
+        return response
 
 
     def setconfig(self, file : str = CONFIG, type : str = "index", **kwargs) -> dict:
