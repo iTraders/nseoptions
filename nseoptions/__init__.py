@@ -22,4 +22,5 @@ ROOT = os.path.abspath(os.path.dirname(__file__))
 CONFIG = os.path.join(ROOT, "config", "default.yaml")
 
 # init-time options registrations
-from nseoptions import core # noqa: F401, F403 # pyright: ignore[reportMissingImports]
+from nseoptions import processing # noqa: F401, F403
+from nseoptions.core import NSEOptionChain # noqa: F401, F403
