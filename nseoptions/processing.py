@@ -150,6 +150,14 @@ class OptionChainProcessing:
 
         data = self.response["records"]["data"]
 
+        # ? get put-call-ratio and total aggregated traded volume
+        self.tot_oi_ce = self.response["filtered"]["CE"]["totOI"]
+        self.tot_oi_pe = self.response["filtered"]["PE"]["totOI"]
+        self.put_call_ratio = self.tot_oi_pe / self.tot_oi_ce
+
+        self.tot_vol_ce = self.response["filtered"]["CE"]["totVol"]
+        self.tot_vol_pe = self.response["filtered"]["PE"]["totVol"]
+
         ocdata = []
         for item in data:
             for instrument, info in item.items():
