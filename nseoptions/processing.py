@@ -131,7 +131,7 @@ class OptionChainProcessing:
         return values.get(symbol, 50)
 
 
-    def makeclean(self, rtype : callable = pd.DataFrame) -> object:
+    def makeclean(self, rtype : callable = pd.DataFrame, verbose : bool = False) -> object:
         """
         Core Functionality to Clean and Process the Data
 
@@ -142,6 +142,10 @@ class OptionChainProcessing:
         :type  rtype: callable
         :param rtype: A callable object that can be used to return the
             data. The default is :class:`pandas.DataFrame`.
+
+        :type  verbose: bool
+        :param verbose: Print the debug and/or other relevant information
+            while fetching the data. Default is False.
         """
 
         data = self.response["records"]["data"]
@@ -155,6 +159,13 @@ class OptionChainProcessing:
                     ocdata.append(dump)
                 else:
                     pass
+
+        if verbose:
+            print(f"{dt.datetime.now()} : Data Fetched for `{self.symbol}`")
+            print(f"  >> Underlying Value   : ₹ {self.underlying:,.2f}")
+            print(f"  >> Response Timestamp : {self.timestamp}")
+            print(f"  >> ATM Strike Price   : ₹ {self.atm:,.2f}")
+            print(f"  >> Strike Price Range : ₹ {self.lstrike:,.2f} - ₹ {self.hstrike:,.2f}")
 
         frame = pd.DataFrame(ocdata) # keep only ce/pe data then filter
         frame = frame[
