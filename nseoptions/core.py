@@ -13,14 +13,6 @@ import pandas as pd
 
 from nseoptions import CONFIG
 
-URI_HEADER = {
-    "accept-language" : "en-US,en;q=0.9,en-IN;q=0.8",
-    "accept-encoding" : "gzip, deflate, br, zstd",
-    "user-agent" : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36"
-}
-
-NSE_OPTION_CHAIN_URI = "https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
-
 
 class NSEOptionChain:
     """
@@ -69,7 +61,6 @@ class NSEOptionChain:
         self.expiry = self.__set_expiry__(expiry)
 
         # ? set the keyword arguments as class attributes
-        self.nstrikes = kwargs.get("nstrikes", 20)
         self.multiple = kwargs.get("multiple", self._multiples.get(symbol, 50))
 
 
@@ -186,125 +177,165 @@ class NSEOptionChain:
         """
 
         return expiry if isinstance(expiry, str) else expiry.strftime("%d-%b-%Y")
+    
 
+    def strikerange(self, underlying : float, nstrikes : int = 20) -> tuple:
+        """
+        Calculate the Range of Strike Prices for the Option Chain
 
-def fetchdoc(symbol : str, expiry : str | dt.date, nstrikes : int = 20, **kwargs) -> pd.DataFrame:
-    expiry = expiry if isinstance(expiry, str) else expiry.strftime("%d-%b-%Y")
+        The option chain consists of a range of strike prices for the
+        given symbol. The function calculates the ATM strike price and
+        returns relevant strike prices for the analysis, which is often
+        the prices nearer to the ATM.
 
-    # define session object, and try to fetch the JSON data
-    session = requests.Session().get(
-        NSE_OPTION_CHAIN_URI.format(symbol = symbol),
-        headers = URI_HEADER
-    )
-
-    # ? default multiple may change over time, but for now it is fixed
-    default_multiple = dict(
-        NIFTY = 50,
-        BANKNIFTY = 100,
-        FINNIFTY = 50,
-        NIFTYNXT50 = 100,
-        MIDCPNIFTY = 25
-    )
-
-    # ? keyword arguments defination and default control settings
-    verbose = kwargs.get("verbose", True)
-    multiple = kwargs.get(
-        "multiple", default_multiple.get(symbol, 50)
-    )
-
-    try:
-        response = session.json()
-        data = response["records"]["data"]
+        :type  underlying: float
+        :param underlying: The underlying value of the symbol or the
+            index for which the option chain data is fetched.
         
-        # ..versionadded:: 0.0.1.dev0 - response is stored for debug
-        timestamp = response["records"]["timestamp"]
-        underlying = response["records"]["underlyingValue"]
+        :type  nstrikes: int
+        :param nstrikes: The number of strike prices above and below the
+            ATM to be fetched from the data. Default is 20.
+        """
 
         # ? calculate atm strike price, and return smaller dataframe
-        atm = round(underlying / multiple) * multiple
-        s, f = atm - nstrikes * multiple, atm + nstrikes * multiple
+        atm = round(underlying / self.multiple) * self.multiple
+        l_strike = atm - nstrikes * self.multiple # lower strike price
+        h_strike = atm + nstrikes * self.multiple # higher strike price
+
+        return atm, l_strike, h_strike
+    
+
+    def get(self, nstrikes : int = 20, verbose : bool = True) -> pd.DataFrame:
+        """
+        Get the Option Chain Data Frame for the Given Symbol for Expiry
+
+        The default response from the website is a response consisting
+        of details of all the expiry for till far future. The function
+        filters the data and returns only the data for the given expiry
+        date and the near ATM strike prices.
+
+        :type  nstrikes: int
+        :param nstrikes: The number of strike prices above and below the
+            ATM to be fetched from the data. Default is 20.
+
+        :type  verbose: bool
+        :param verbose: Print the debug and/or other relevant information
+            while fetching the data. Default is True.
+        """
+
+        self.timestamp = self.response["records"]["timestamp"]
+        self.underlying = self.response["records"]["underlyingValue"]
+
+        # expose essential value as class attribute, and
+        # also make them available as self.essential dictionary
+        self.atm, self.l_strike, self.h_strike = self.strikerange(self.underlying, nstrikes)
 
         if verbose:
-            print(f"{dt.datetime.now()} : Data Fetched for `{symbol}`")
-            print(f"  >> Underlying Value   : ₹ {underlying:,.2f}")
-            print(f"  >> Response Timestamp : {timestamp}")
-            print(f"  >> ATM Strike Price   : ₹ {atm:,.2f}")
-            print(f"  >> Strike Price Range : ₹ {s:,.2f} - ₹ {f:,.2f}")
+            print(f"{dt.datetime.now()} : Data Fetched for `{self.symbol}`")
+            print(f"  >> Underlying Value   : ₹ {self.underlying:,.2f}")
+            print(f"  >> Response Timestamp : {self.timestamp}")
+            print(f"  >> ATM Strike Price   : ₹ {self.atm:,.2f}")
+            print(f"  >> Strike Price Range : ₹ {self.l_strike:,.2f} - ₹ {self.h_strike:,.2f}")
+        
 
-    except Exception as e:
-        print(f"{dt.datetime.now()} : Failed to Fetch Data::\n\t{e}")
+        # aggregated values are already available in the API call
+        self.tot_oi_ce = self.response["filtered"]["CE"]["totOI"]
+        self.tot_oi_pe = self.response["filtered"]["PE"]["totOI"]
+        self.global_pcr = self.tot_oi_pe / self.tot_oi_ce
 
-    ocdata = []
-    for item in data:
-        for instrument, info in item.items():
-            if instrument in ["CE", "PE"]:
-                dump = info # current line item dump
-                dump["instrumentType"] = instrument # CE/PE tag level
-                ocdata.append(dump)
-            else:
-                pass
-    
-    frame = pd.DataFrame(ocdata) # all the data are in the dataframe
+        self.tot_vol_ce = self.response["filtered"]["CE"]["totVol"]
+        self.tot_vol_pe = self.response["filtered"]["PE"]["totVol"]
 
-    # first we filter for the required expiry date, and then
-    # we get the total put call ratio for the given expiry, then filter date
-    frame = frame[frame["expiryDate"] == expiry]
-    tot_oi_ce = frame[frame["instrumentType"] == "CE"]["openInterest"].sum()
-    tot_oi_pe = frame[frame["instrumentType"] == "PE"]["openInterest"].sum()
-    global_pcr = tot_oi_pe / tot_oi_ce # better to get for the overall
+        return self.makeframe()
 
-    # also find the total volume traded for the given expiry for ce/pe
-    tot_vol_ce = frame[frame["instrumentType"] == "CE"]["totalTradedVolume"].sum()
-    tot_vol_pe = frame[frame["instrumentType"] == "PE"]["totalTradedVolume"].sum()
 
-    frame = frame[frame["strikePrice"].between(s, f)]
+    @property
+    def essentials(self) -> dict:
+        """
+        Return Important Ratio/Values for the Option Chain Data
+        """
 
-    # since we already know the expiry and symbol, we can delete them
-    # also identifier is not required as we will not be placing order
-    frame.drop(columns = ["expiryDate", "underlying", "identifier", "underlyingValue"], inplace = True)
+        return dict(
+            symbol = self.symbol, expiry = self.expiry,
+            timestamp = self.response["records"]["timestamp"],
+            underlying = self.response["records"]["underlyingValue"],
 
-    # now we can safely return the option chain data like in nse
-    ce = frame[frame["instrumentType"] == "CE"]
-    pe = frame[frame["instrumentType"] == "PE"]
+            # return for atm, strike price range
+            atm = self.atm, l_strike = self.l_strike, h_strike = self.h_strike,
 
-    # near atm strike is also a option for pcr calculation, better avoid
-    near_oi_ce = ce["openInterest"].sum()
-    near_oi_pe = pe["openInterest"].sum()
+            # return for pcr related calculation
+            global_pcr = self.global_pcr, tot_oi_ce = self.tot_oi_ce, tot_oi_pe = self.tot_oi_pe,
 
-    # near atm volume may also be a good indicator for tracking
-    near_vol_ce = ce["totalTradedVolume"].sum()
-    near_vol_pe = pe["totalTradedVolume"].sum()
+            # near atm total oi is a quick tool for market analysis, better avoid
+            near_oi_ce = self.ce["openInterest"].sum(),
+            near_oi_pe = self.pe["openInterest"].sum(),
+            near_oi_pcr = self.pe["openInterest"].sum() / self.ce["openInterest"].sum(),
 
-    opchain = pd.merge(
-        ce, pe, how = "inner", on = "strikePrice", suffixes = ("_ce", "_pe")
-    )
+            # return for volume related calculation
+            tot_vol_ce = self.tot_vol_ce, tot_vol_pe = self.tot_vol_pe,
 
-    opchain.drop(columns = ["instrumentType_ce", "instrumentType_pe"], inplace = True)
+            # also return total volume for near atm strike prices
+            near_vol_ce = self.ce["totalTradedVolume"].sum(),
+            near_vol_pe = self.pe["totalTradedVolume"].sum()
+        )
 
-    # mimic and return the columns as in the nse option chain
-    columns = [
-        "openInterest", "changeinOpenInterest", "pchangeinOpenInterest",
-        "totalTradedVolume", "impliedVolatility", "lastPrice", "change", "pChange",
-        "totalBuyQuantity", "totalSellQuantity", "bidQty", "bidprice", "askQty", "askPrice"
-    ]
 
-    cecols_ = [f"{col}_ce" for col in columns]
-    pecols_ = [f"{col}_pe" for col in columns][::-1]
-    opchain = opchain[cecols_ + ["strikePrice"] + pecols_]
+    def makeframe(self) -> pd.DataFrame:
+        """
+        Make and Process the Data Frame for the Option Chain Data
 
-    # return other important response as a dictionary data
-    # this can be written as a value where required in the future
-    essentials = dict(
-        symbol = symbol, expiry = expiry, timestamp = timestamp,
-        underlying = underlying, atm = atm,
+        :type  nstrikes: int
+        :param nstrikes: The number of strike prices above and below the
+            ATM to be fetched from the data. Default is 20.
+        """
 
-        # return for pcr related calculation
-        global_pcr = global_pcr, tot_oi_ce = tot_oi_ce, tot_oi_pe = tot_oi_pe,
-        near_pcr = near_oi_pe / near_oi_ce, near_oi_ce = near_oi_ce, near_oi_pe = near_oi_pe,
+        data = self.response["records"]["data"]
 
-        # return for volume related calculation
-        tot_vol_ce = tot_vol_ce, tot_vol_pe = tot_vol_pe,
-        near_vol_ce = near_vol_ce, near_vol_pe = near_vol_pe
-    )
+        ocdata = []
+        for item in data:
+            for instrument, info in item.items():
+                if instrument in ["CE", "PE"]:
+                    dump = info # current line item dump
+                    dump["instrumentType"] = instrument # CE/PE tag level
+                    ocdata.append(dump)
+                else:
+                    pass
 
-    return response, frame, opchain, essentials
+        frame = pd.DataFrame(ocdata) # all the data are in the dataframe
+
+        # we will just filter the required data, and then make clean frame
+        frame = frame[
+            (frame["expiryDate"] == self.expiry)
+            & (frame["strikePrice"].between(self.l_strike, self.h_strike))
+        ]
+
+        # since we already know the expiry and symbol, we can delete them
+        # also identifier is not required as we will not be placing order
+        _dropcols = ["expiryDate", "underlying", "identifier", "underlyingValue"]
+        frame.drop(columns = _dropcols, inplace = True)
+
+        # also set the raw dataframe as a class attribute, dev usage
+        self.frame = frame # chain data as in the raw format
+
+        # now we can safely return the option chain data like in nse
+        self.ce = frame[frame["instrumentType"] == "CE"]
+        self.pe = frame[frame["instrumentType"] == "PE"]
+
+        opchain = pd.merge(
+            self.ce, self.pe, how = "inner", on = "strikePrice",
+            suffixes = ("_ce", "_pe")
+        )
+
+        opchain.drop(columns = ["instrumentType_ce", "instrumentType_pe"], inplace = True)
+
+        # mimic and return the columns as in the nse option chain
+        columns = [
+            "openInterest", "changeinOpenInterest", "pchangeinOpenInterest",
+            "totalTradedVolume", "impliedVolatility", "lastPrice", "change", "pChange",
+            "totalBuyQuantity", "totalSellQuantity", "bidQty", "bidprice", "askQty", "askPrice"
+        ]
+
+        cecols_ = [f"{col}_ce" for col in columns]
+        pecols_ = [f"{col}_pe" for col in columns][::-1]
+
+        return opchain[cecols_ + ["strikePrice"] + pecols_]
