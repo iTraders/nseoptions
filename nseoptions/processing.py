@@ -82,7 +82,9 @@ class OptionChainProcessing:
         self.multiple = kwargs.get("multiple", self.imultiple(symbol))
 
         # ? set class attributes from the response for various methods
-        self.timestamp = self.response["records"]["timestamp"]
+        self.timestamp = dt.datetime.strptime(
+            self.response["records"]["timestamp"], "%d-%b-%Y %H:%M:%S"
+        )
         self.underlying = self.response["records"]["underlyingValue"]
 
         # ? set the strike price range for the given expiry date
