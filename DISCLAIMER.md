@@ -1,6 +1,6 @@
 <div align = "center">
 
-# Disclaimer
+# Disclaimer Note
 
 </div>
 
