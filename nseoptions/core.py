@@ -79,15 +79,17 @@ class NSEOptionChain:
             self.NSE_API_URI, headers = self.URI_HEADER
         )
 
-        fetched = False
+        fetched, count = False, 0
         while not fetched:
             try:
                 response = session.json()
 
                 fetched = True # exit the loop if json is fetched
             except Exception as e:
+                count += 1 # track number of times the fetch fails
                 print(f"{time.ctime()} : Failed to Fetch Data - {e}")
-                _ = [time.sleep(1) for _ in TQ(range(waittime), desc = "Retrying...")]
+
+                _ = [time.sleep(1) for _ in TQ(range(waittime), desc = f"#{count + 1} Retrying...")]
 
         return response
 
