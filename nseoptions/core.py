@@ -75,13 +75,12 @@ class NSEOptionChain:
         the headers are set to mimic a browser request to the website.
         """
 
-        session = requests.Session().get(
-            self.NSE_API_URI, headers = self.URI_HEADER
-        )
-
         fetched, count = False, 0
         while not fetched:
             try:
+                session = requests.Session().get(
+                    self.NSE_API_URI, headers = self.URI_HEADER
+                )
                 response = session.json()
 
                 fetched = True # exit the loop if json is fetched
