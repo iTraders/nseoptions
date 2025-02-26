@@ -14,6 +14,7 @@ the entire day (when the market is open, or as per requirement).
 
 import os     # miscellaneous os interfaces
 import sys    # configuring python runtime environment
+import json   # module to manipulate json object in python
 import time   # library for time manipulation, and logging
 import shutil # module for high level file operations like copy
 
@@ -42,6 +43,16 @@ import prettify # https://gist.github.com/ZenithClown/c6b4c51de4d4dac564ecbe0e17
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import nseoptions # https://github.com/iTraders/nseoptions
+
+def writejson(response : dict, symbol : str, timestamp : dt.datetime | str, outdir : str) -> bool:
+    timestamp = str(timestamp).replace(":", "") # time is now formatted
+    filename = os.path.join(outdir, f"{symbol} at {timestamp}.json")
+
+    with open(filename, "w") as f:
+        json.dump(response, f, indent = 2, sort_keys = False, default = str)
+
+    return True
+
 
 def writefile(file : str, opchain : pd.DataFrame, model : object) -> bool:
     wb = xw.Book(file) # open the copied template file
@@ -83,6 +94,10 @@ if __name__ == "__main__":
     template = os.path.join(".", "template", "NSE Option Chain.xlsx")
     shutil.copy(template, filename) # make a copy of the template file
 
+    # also create internal directory to track and save all json response
+    responsedir = os.path.join(".", "output", str(today))
+    os.makedirs(responsedir, exist_ok = True)
+
     print(f"{time.ctime()} : Staring API Collection")
     print(f"  >> Output File Path: {filename}", end = "\n\n")
 
@@ -97,6 +112,8 @@ if __name__ == "__main__":
         )
 
         opchain = model.makeclean(verbose = True)
+
         writefile(file = filename, opchain = opchain, model = model)
+        writejson(response, symbol, timestamp = model.timestamp, outdir = responsedir)
 
         _ = [time.sleep(1) for _ in TQ(range(30), desc = "Waiting to Refresh...")]
