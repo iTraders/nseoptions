@@ -46,7 +46,7 @@ import nseoptions # https://github.com/iTraders/nseoptions
 
 def writejson(response : dict, symbol : str, timestamp : dt.datetime | str, outdir : str) -> bool:
     timestamp = str(timestamp).replace(":", "") # time is now formatted
-    filename = os.path.join(outdir, f"{symbol} at {timestamp}.json")
+    filename = os.path.join(outdir, f"{symbol} #{str(UUID())[:7].upper()} at {timestamp}.json")
 
     with open(filename, "w") as f:
         json.dump(response, f, indent = 2, sort_keys = False, default = str)
