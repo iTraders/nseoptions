@@ -1,0 +1,3 @@
+[submodule "modules/prettify"]
+	path = modules/prettify
+	url = https://gist.github.com/ZenithClown/c6b4c51de4d4dac564ecbe0e178955cb.git
