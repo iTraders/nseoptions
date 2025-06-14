@@ -37,7 +37,9 @@ pd.options.display.float_format = '{:,.3f}'.format # float precisions
 import xlwings as xw # https://www.xlwings.org/
 
 # ! please download the prettify file from gist/github
-import prettify # https://gist.github.com/ZenithClown/c6b4c51de4d4dac564ecbe0e178955cb
+# https://gist.github.com/ZenithClown/c6b4c51de4d4dac564ecbe0e178955cb
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "prettify"))
+import prettify # noqa: F401, F403 # pyright: ignore[reportMissingImports]
 
 # ! append the root (this file) directory to the system path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
