@@ -18,6 +18,8 @@ import json   # module to manipulate json object in python
 import time   # library for time manipulation, and logging
 import shutil # module for high level file operations like copy
 
+import argparse # argument parser for additional controls
+
 # use `datetime` to control and preceive the environment
 # in addition `pandas` also provides date time functionalities
 import datetime as dt
@@ -80,7 +82,21 @@ if __name__ == "__main__":
     symbol = input("Enter the Symbol [NIFTY]: ").upper() or "NIFTY"
     expiry = input("Enter the Expiry (DD-MMM-YYYY): ")
 
-    API = nseoptions.NSEOptionChain(symbol) # main api object, loop on
+    # ..versionadded:: 2025-10-15 - CLI Argument Parse for Controls
+    parser = argparse.ArgumentParser(description = "ARGPARSE Enabled")
+    parser.add_argument(
+        "--no-verify",
+        dest = "verify",
+        action = "store_false",
+        help = "SSL Verification, Defaults to False."
+    )
+
+    # ? get arguments from the argparse controller - use in forward
+    args = parser.parse_args()
+
+    API = nseoptions.NSEOptionChain(
+        symbol, verify = args.verify
+    ) # main api object, loop on
     _ = API.setconfig() # configuration settings for the API, onetime
 
     prettify.textAlign("NSE Options Chain Data Fetcher", align = "center")
