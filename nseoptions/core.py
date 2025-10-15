@@ -48,19 +48,27 @@ class NSEOptionChain:
     fully tested).
 
         * **verbose** (*bool*) - Print the debug and/or other relevant
-            information while fetching the data. Default is True.
+          information while fetching the data. Default is True.
 
         * **multiple** (*int*) - The multiple of the strike price for
-            a symbol or an index value. The default value is set for
-            the indexes like NIFTY, BANKNIFTY, etc. To set the multiple
-            for other symbols set the value, defaults to 50.
+          a symbol or an index value. The default value is set for the
+          indexes like NIFTY, BANKNIFTY, etc. To set the multiple for
+          other symbols set the value, defaults to 50.
 
         * **nstrikes** (*int*) - The number of strike prices above and
-            below the ATM to be fetched from the data. Default is 20.
+          below the ATM to be fetched from the data. Default is 20.
+
+        * **verify** (*bool*) - SSL certificate validation to get the
+          data from the internet. Always recommended to be True, but
+          in case of legacy/restricted systems this option comes in
+          handy. Defaults to False.
     """
 
-    def __init__(self, symbol : str) -> None:
+    def __init__(self, symbol : str, **kwargs) -> None:
         self.symbol = symbol.upper()
+
+        # keyword arguments parsed from cli/object initialization
+        self.verify = kwargs.get("verify", False)
 
 
     def response(self, waittime : int = 10) -> dict:
@@ -79,7 +87,9 @@ class NSEOptionChain:
         while not fetched:
             try:
                 session = requests.Session().get(
-                    self.NSE_API_URI, headers = self.URI_HEADER
+                    self.NSE_API_URI,
+                    headers = self.URI_HEADER,
+                    verify = self.verify
                 )
                 response = session.json()
 
