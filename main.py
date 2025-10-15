@@ -25,7 +25,6 @@ import datetime as dt
 from tqdm import tqdm as TQ # progress bar for loops
 from uuid import uuid4 as UUID # unique identifier for objs
 
-import swifter
 import numpy as np
 import pandas as pd
 
