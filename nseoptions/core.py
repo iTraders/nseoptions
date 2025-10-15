@@ -6,13 +6,9 @@ Main File to Fetch NSE India Options Chain Data
 
 import time
 import yaml
-
 import requests
-import datetime as dt
 
 from tqdm import tqdm as TQ
-
-import pandas as pd
 
 from nseoptions import CONFIG
 
