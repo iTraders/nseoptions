@@ -241,8 +241,16 @@ class OptionChainProcessing:
             print(f"  >> Strike Price Range : ₹ {self.lstrike:,.2f} - ₹ {self.hstrike:,.2f}")
 
         frame = pd.DataFrame(ocdata) # keep only ce/pe data then filter
+
+        # ! v3 leg-level `expiryDate` carries a numeric month (`16-06-2026`)
+        # while the canonical form is `16-Jun-2026` - compare parsed dates so
+        # the filter is format agnostic (live-probed on 2026-06-12)
+        # ..versionchanged:: 2026-06-12 Date Based Expiry Filter for NSE v3
+        expirydates = pd.to_datetime(frame["expiryDate"], dayfirst = True).dt.date
+        expiry = dt.datetime.strptime(self.expiry, "%d-%b-%Y").date()
+
         frame = frame[
-            (frame["expiryDate"] == self.expiry)
+            (expirydates == expiry)
             & (frame["strikePrice"].between(self.lstrike, self.hstrike))
         ]
 
