@@ -1,0 +1,9 @@
+# dependencies + build artifacts (the bundle is rebuilt by `vite build`)
+node_modules/
+dist/
+
+# logs + local env
+*.log
+.env
+.env.local
+.vite/
