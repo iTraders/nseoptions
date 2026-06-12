@@ -1,6 +1,7 @@
 import { Header } from "@/components/layout/Header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { OptionChainPanel } from "@/features/chain/OptionChainPanel";
 import { useChainSocket } from "@/hooks/useChainSocket";
 import { useMeta } from "@/hooks/useMeta";
 import { useDashboardStore, type DashboardTab } from "@/store/dashboard";
@@ -36,7 +37,7 @@ export default function App() {
           </TabsList>
 
           <TabsContent value="chain">
-            <Placeholder title="Live option chain — built in the next step" />
+            <OptionChainPanel expiry={current} />
           </TabsContent>
           <TabsContent value="history">
             <Placeholder title="Per-strike price / OI / IV history" />
