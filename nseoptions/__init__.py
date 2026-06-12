@@ -13,7 +13,8 @@ module aims to fetch and parse the data to be used in other projects.
 
 # ? package follows https://peps.python.org/pep-0440/
 # ? https://python-semver.readthedocs.io/en/latest/advanced/convert-pypi-to-semver.html
-__version__ = "v0.0.1.dev0"
+# ..versionchanged:: 2026-06-12 NSE v3 Option Chain API Migration
+__version__ = "v0.1.0.dev0"
 
 # ? register root of the package, this is required to import config
 import os

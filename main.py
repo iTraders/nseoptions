@@ -8,8 +8,12 @@ terminal or command prompt. The file is set to run iteratively and
 fetch the option chain data for the given symbol and expiry date for
 the entire day (when the market is open, or as per requirement).
 
+:NOTE: As on 2026-06-12 the script is migrated to the NSE v3 option
+    chain API which mandates a valid expiry per request, hence the
+    expiry is now validated against the live contract information.
+
 @author:  Debmalya Pramanik
-@version: v0.0.1
+@version: v0.1.0
 """
 
 import os     # miscellaneous os interfaces
@@ -27,12 +31,10 @@ import datetime as dt
 from tqdm import tqdm as TQ # progress bar for loops
 from uuid import uuid4 as UUID # unique identifier for objs
 
-import numpy as np
 import pandas as pd
 
 pd.set_option('display.max_rows', 50) # max. rows to show
 pd.set_option('display.max_columns', 15) # max. cols to show
-np.set_printoptions(precision = 3, threshold = 15) # set np options
 pd.options.display.float_format = '{:,.3f}'.format # float precisions
 
 import xlwings as xw # https://www.xlwings.org/
@@ -40,7 +42,17 @@ import xlwings as xw # https://www.xlwings.org/
 # ! please download the prettify file from gist/github
 # https://gist.github.com/ZenithClown/c6b4c51de4d4dac564ecbe0e178955cb
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "prettify"))
-import prettify # noqa: F401, F403 # pyright: ignore[reportMissingImports]
+
+# ..versionchanged:: 2026-06-12 Fallback Shim When Prettify Is Missing
+try:
+    import prettify # noqa: F401, F403 # pyright: ignore[reportMissingImports]
+except ImportError:
+    # ! fallback shim - the gist submodule may be uninitialized, run
+    # `git submodule update --init` to restore the original helper
+    class prettify:
+        @staticmethod
+        def textAlign(text : str, align : str = "center", **kwargs) -> None:
+            print(text.center(88) if align == "center" else text)
 
 # ! append the root (this file) directory to the system path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -79,10 +91,8 @@ def writefile(file : str, opchain : pd.DataFrame, model : object) -> bool:
 
 
 if __name__ == "__main__":
-    symbol = input("Enter the Symbol [NIFTY]: ").upper() or "NIFTY"
-    expiry = input("Enter the Expiry (DD-MMM-YYYY): ")
-
     # ..versionadded:: 2025-10-15 - CLI Argument Parse for Controls
+    # ..versionchanged:: 2026-06-12 Arguments Parsed Before Interactive Prompts
     parser = argparse.ArgumentParser(description = "ARGPARSE Enabled")
     parser.add_argument(
         "--no-verify",
@@ -94,6 +104,8 @@ if __name__ == "__main__":
     # ? get arguments from the argparse controller - use in forward
     args = parser.parse_args()
 
+    symbol = input("Enter the Symbol [NIFTY]: ").upper() or "NIFTY"
+
     API = nseoptions.NSEOptionChain(
         symbol, verify = args.verify
     ) # main api object, loop on
@@ -101,6 +113,30 @@ if __name__ == "__main__":
 
     prettify.textAlign("NSE Options Chain Data Fetcher", align = "center")
     prettify.textAlign("Author: Debmalya Pramanik", align = "center")
+
+    # ..versionchanged:: 2026-06-12 Expiry Validated Against Live Contract Info
+    # ! let any exception propagate - if NSE is unreachable, fail loudly here
+    validexpiry = API.expiries()
+    print(f"  >> Available Expiries : {', '.join(validexpiry[:8])} ...")
+
+    while True:
+        expiry = input(
+            f"Enter the Expiry (DD-MMM-YYYY) [{validexpiry[0]}]: "
+        ).strip() or validexpiry[0]
+
+        try:
+            expiry = API.setexpiry(expiry)
+        except ValueError:
+            print(
+                "  >> Bad Format - Expected DD-MMM-YYYY, "
+                f"Example: {validexpiry[0]}"
+            )
+            continue
+
+        if expiry in validexpiry:
+            break
+
+        print(f"  >> {expiry} is not a listed expiry for {symbol}.")
 
     # ? create a file for the session, use the base template file
     # continuously overwrite on the file with the latest changed data
@@ -118,19 +154,27 @@ if __name__ == "__main__":
     print(f"{time.ctime()} : Staring API Collection")
     print(f"  >> Output File Path: {filename}", end = "\n\n")
 
-    while True:
-        # ! the application need to be forced close with CTRL+C
-        # ! or by directly closing the terminal or command prompt
-        response = API.response(waittime = 20) # auto retry if failed
+    # ..versionchanged:: 2026-06-12 Graceful Exit on Interrupt and Capped Retries
+    try:
+        while True:
+            # ! the application need to be forced close with CTRL+C
+            # ! or by directly closing the terminal or command prompt
+            response = API.response(waittime = 20) # auto retry if failed
 
-        # ? create the model object, this is on the fly, processing
-        model = nseoptions.processing.OptionChainProcessing(
-            symbol, apikey = "", response = response, expiry = expiry
-        )
+            # ? create the model object, this is on the fly, processing
+            model = nseoptions.processing.OptionChainProcessing(
+                symbol, apikey = "", response = response, expiry = expiry
+            )
 
-        opchain = model.makeclean(verbose = True)
+            opchain = model.makeclean(verbose = True)
 
-        writefile(file = filename, opchain = opchain, model = model)
-        writejson(response, symbol, timestamp = model.timestamp, outdir = responsedir)
+            writefile(file = filename, opchain = opchain, model = model)
+            writejson(response, symbol, timestamp = model.timestamp, outdir = responsedir)
 
-        _ = [time.sleep(1) for _ in TQ(range(30), desc = "Waiting to Refresh...")]
+            _ = [time.sleep(1) for _ in TQ(range(30), desc = "Waiting to Refresh...")]
+    except KeyboardInterrupt:
+        print(f"\n{time.ctime()} : Stopped by User (CTRL + C), Exiting Gracefully.")
+        sys.exit(0)
+    except ConnectionError as err:
+        print(f"{time.ctime()} : {err} - Exiting.")
+        sys.exit(1)
