@@ -52,9 +52,13 @@ def _leg(strike : float, atm : float, expiry : str, kind : str, dte : int, zero 
     # ? a simple volatility smile: lowest near the ATM, rising on the wings
     iv = _round(11.0 + 0.40 * abs(off) + 0.015 * off ** 2)
 
-    # ? open-interest skew: CE walls build above spot, PE walls below it
-    peak = 5.0 if kind == "CE" else -5.0
-    oi   = 0 if zero else int(8_000_000 * math.exp(-((off - peak) ** 2) / 22.0) + 15_000)
+    # ? open-interest skew: CE walls build above spot, PE walls below it;
+    # ? the put side is intentionally heavier so PCR > 1 (mild bullishness)
+    if kind == "CE":
+        peak, amp = 6.0, 7_200_000
+    else:
+        peak, amp = -4.0, 9_800_000
+    oi = 0 if zero else int(amp * math.exp(-((off - peak) ** 2) / 24.0) + 15_000)
 
     chg_oi = 0 if zero else int(oi * random.uniform(-0.35, 0.55))
     base   = oi - chg_oi
