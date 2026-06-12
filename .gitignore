@@ -225,3 +225,7 @@ $RECYCLE.BIN/
 
 # ignore everything (excel, json) under output directory
 output/
+
+# macOS finder metadata
+.DS_Store
+**/.DS_Store
