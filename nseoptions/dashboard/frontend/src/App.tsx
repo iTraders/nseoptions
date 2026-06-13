@@ -1,20 +1,12 @@
 import { Header } from "@/components/layout/Header";
-import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { StrategyBuilderPanel } from "@/features/builder/StrategyBuilderPanel";
 import { OptionChainPanel } from "@/features/chain/OptionChainPanel";
+import { HistoryPanel } from "@/features/history/HistoryPanel";
+import { SuggestionsPanel } from "@/features/suggestions/SuggestionsPanel";
 import { useChainSocket } from "@/hooks/useChainSocket";
 import { useMeta } from "@/hooks/useMeta";
 import { useDashboardStore, type DashboardTab } from "@/store/dashboard";
-
-function Placeholder({ title }: { title: string }) {
-  return (
-    <Card>
-      <CardContent className="flex h-72 items-center justify-center text-sm text-muted-foreground">
-        {title}
-      </CardContent>
-    </Card>
-  );
-}
 
 export default function App() {
   const { data: meta } = useMeta();
@@ -40,13 +32,13 @@ export default function App() {
             <OptionChainPanel expiry={current} />
           </TabsContent>
           <TabsContent value="history">
-            <Placeholder title="Per-strike price / OI / IV history" />
+            <HistoryPanel expiry={current} />
           </TabsContent>
           <TabsContent value="builder">
-            <Placeholder title="Multi-leg strategy builder" />
+            <StrategyBuilderPanel expiry={current} />
           </TabsContent>
           <TabsContent value="suggestions">
-            <Placeholder title="Rules-based strategy suggestions" />
+            <SuggestionsPanel expiry={current} />
           </TabsContent>
         </Tabs>
       </main>
