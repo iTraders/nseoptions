@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 # ! the per-leg numeric fields, in the order makeclean() emits them; the
 # ! frontend table consumes the same keys for both the CE and PE legs
+# ..versionchanged:: 2026-06-13 NSE v3 Bid/Ask Depth Field Names
 LEG_FIELDS = (
     "openInterest",
     "changeinOpenInterest",
@@ -34,10 +35,10 @@ LEG_FIELDS = (
     "pChange",
     "totalBuyQuantity",
     "totalSellQuantity",
-    "bidQty",
-    "bidprice",
-    "askQty",
-    "askPrice"
+    "buyQuantity1",
+    "buyPrice1",
+    "sellQuantity1",
+    "sellPrice1"
 )
 
 
@@ -54,10 +55,10 @@ class LegQuote(BaseModel):
     pChange               : float = 0.0
     totalBuyQuantity      : float = 0.0
     totalSellQuantity     : float = 0.0
-    bidQty                : float = 0.0
-    bidprice              : float = 0.0
-    askQty                : float = 0.0
-    askPrice              : float = 0.0
+    buyQuantity1          : float = 0.0
+    buyPrice1             : float = 0.0
+    sellQuantity1         : float = 0.0
+    sellPrice1            : float = 0.0
 
 
 class StrikeRow(BaseModel):

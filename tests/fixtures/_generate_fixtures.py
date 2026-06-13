@@ -88,10 +88,10 @@ def _leg(strike : float, atm : float, expiry : str, kind : str, dte : int, zero 
         "pChange"               : 0.0 if zero else pch,
         "totalBuyQuantity"      : 0 if zero else int(random.uniform(1, 50)) * 75,
         "totalSellQuantity"     : 0 if zero else int(random.uniform(1, 50)) * 75,
-        "bidQty"                : 0 if zero else int(random.uniform(1, 40)) * 75,
-        "bidprice"              : 0.0 if zero else bid,
-        "askQty"                : 0 if zero else int(random.uniform(1, 40)) * 75,
-        "askPrice"              : 0.0 if zero else ask,
+        "buyQuantity1"          : 0 if zero else int(random.uniform(1, 40)) * 75,
+        "buyPrice1"             : 0.0 if zero else bid,
+        "sellQuantity1"         : 0 if zero else int(random.uniform(1, 40)) * 75,
+        "sellPrice1"            : 0.0 if zero else ask,
         "underlyingValue"       : SPOT
     }
 
