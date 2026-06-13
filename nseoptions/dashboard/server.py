@@ -26,9 +26,12 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from nseoptions.processing import OptionChainProcessing
+
 from nseoptions.dashboard import schemas, analytics, suggester
 from nseoptions.dashboard.history import HistoryStore
 from nseoptions.dashboard.settings import AppSettings
+from nseoptions.dashboard.downloader import DownloadManager
 from nseoptions.dashboard.service import OptionChainService, NoDataError
 
 
@@ -50,10 +53,14 @@ def create_app(settings : AppSettings) -> FastAPI:
         store   = HistoryStore(settings.db_path, settings.symbol)
         service = OptionChainService(settings, history = store)
 
-        app.state.settings  = settings
-        app.state.history   = store
-        app.state.service   = service
-        app.state.suggester = suggester.RulesBasedSuggester()
+        app.state.settings   = settings
+        app.state.history    = store
+        app.state.service    = service
+        app.state.suggester  = suggester.RulesBasedSuggester()
+
+        # ! the user-driven asynchronous downloader; it stays idle until the
+        # ! "Fetch Data" control starts it and writes through its sink
+        app.state.downloader = DownloadManager(settings)
 
         await service.prime() # setconfig + nse anti-bot cookie priming
         task = asyncio.create_task(service.poll_forever())
@@ -61,6 +68,7 @@ def create_app(settings : AppSettings) -> FastAPI:
         try:
             yield
         finally:
+            await app.state.downloader.stop()
             service.stop()
             task.cancel()
             try:
@@ -143,6 +151,35 @@ def create_app(settings : AppSettings) -> FastAPI:
             symbol = service.symbol, expiry = snapshot.expiry,
             context = context_summary, suggestions = ranked
         )
+
+    # ----------------------- download controls -------------------------- #
+
+    @app.get("/api/symbols", response_model = schemas.SymbolsOut)
+    async def symbols(request : Request) -> schemas.SymbolsOut:
+        catalogue = request.app.state.settings.symbols
+        return schemas.SymbolsOut(
+            symbols = [
+                schemas.SymbolInfo(
+                    symbol = sym, multiple = OptionChainProcessing.imultiple(sym)
+                )
+                for sym in catalogue
+            ],
+            default = list(catalogue)
+        )
+
+    @app.post("/api/fetch/start", response_model = schemas.FetchStatus)
+    async def fetch_start(
+        request : Request, body : schemas.FetchRequest
+    ) -> schemas.FetchStatus:
+        return await request.app.state.downloader.start(body.symbols)
+
+    @app.post("/api/fetch/stop", response_model = schemas.FetchStatus)
+    async def fetch_stop(request : Request) -> schemas.FetchStatus:
+        return await request.app.state.downloader.stop()
+
+    @app.get("/api/fetch/status", response_model = schemas.FetchStatus)
+    async def fetch_status(request : Request) -> schemas.FetchStatus:
+        return request.app.state.downloader.status()
 
     # --------------------------- WebSocket ------------------------------ #
 

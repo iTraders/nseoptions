@@ -51,7 +51,9 @@ class DownloadManager:
         PostgreSQL writer is wired in once database integration lands).
     """
 
-    def __init__(self, settings : AppSettings, sink : worker.Sink | None = None) -> None:
+    def __init__(
+        self, settings : AppSettings, sink : worker.Sink | None = None
+    ) -> None:
         self._settings  = settings
         self._semaphore = asyncio.Semaphore(settings.max_concurrent)
         self._lock      = asyncio.Lock()
