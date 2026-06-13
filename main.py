@@ -16,11 +16,12 @@ the entire day (when the market is open, or as per requirement).
 @version: v0.1.0
 """
 
-import os     # miscellaneous os interfaces
-import sys    # configuring python runtime environment
-import json   # module to manipulate json object in python
-import time   # library for time manipulation, and logging
-import shutil # module for high level file operations like copy
+import os       # miscellaneous os interfaces
+import sys      # configuring python runtime environment
+import json     # module to manipulate json object in python
+import time     # library for time manipulation, and logging
+import shutil   # module for high level file operations like copy
+import warnings # surface a notice when ssl verification is bypassed
 
 import argparse # argument parser for additional controls
 
@@ -98,11 +99,23 @@ if __name__ == "__main__":
         "--no-verify",
         dest = "verify",
         action = "store_false",
-        help = "SSL Verification, Defaults to False."
+        help = "Bypass SSL certificate verification (a warning is shown)."
     )
 
     # ? get arguments from the argparse controller - use in forward
     args = parser.parse_args()
+
+    # ..versionchanged:: 2026-06-13 Warn Once When SSL Verification Is Bypassed
+    if not args.verify:
+        # ! `--no-verify` bypasses SSL checks intentionally - warn once, then
+        # silence the per-request urllib3 spam so the polling loop stays clean
+        import urllib3 # noqa: E402 # only needed when verification is bypassed
+
+        warnings.warn(
+            "SSL certificate verification is DISABLED via `--no-verify`.",
+            stacklevel = 2
+        )
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     symbol = input("Enter the Symbol [NIFTY]: ").upper() or "NIFTY"
 
