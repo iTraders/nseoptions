@@ -98,7 +98,7 @@ class NSEOptionChain:
         self.session = None
 
 
-    # ..versionchanged:: 2026-06-12 Persistent Warmed Session, Timeout and Capped Retries
+    # ..versionchanged:: 2026-06-12 Warmed Session, Timeout and Capped Retries
     def response(self, waittime : int = 10, maxretries : int = 30) -> dict:
         """
         Fetch the Option Chain JSON Payload from the NSE v3 API
@@ -140,9 +140,7 @@ class NSEOptionChain:
                 if self.session is None:
                     self.__newsession__()
 
-                # ! verify/timeout must stay per-request - the broken
-                # `CURL_CA_BUNDLE='""'` env var on this machine defeats
-                # session-level verify via merge_environment_settings
+                # ? verify/timeout are passed per request, not on the session
                 session_response = self.session.get(
                     self.NSE_API_URI,
                     headers = self.URI_HEADER,
@@ -162,6 +160,12 @@ class NSEOptionChain:
             except Exception as e:
                 self.session = None # ! forces cookie re-warm on next attempt
                 print(f"{time.ctime()} : Failed to Fetch Data - {e}")
+
+                # ! on the last attempt, chain the cause and skip the wait
+                if count == maxretries:
+                    raise ConnectionError(
+                        f"NSE v3 fetch failed after {maxretries} attempts"
+                    ) from e
 
                 _ = [
                     time.sleep(1)
@@ -318,14 +322,12 @@ class NSEOptionChain:
         if not hasattr(self, "NSE_CONTRACT_URI"):
             self.setconfig()
 
-        if self.session is None:
-            self.__newsession__()
-
         for attempt in range(2):
             try:
-                # ! verify/timeout must stay per-request - the broken
-                # `CURL_CA_BUNDLE='""'` env var on this machine defeats
-                # session-level verify via merge_environment_settings
+                if self.session is None:
+                    self.__newsession__()
+
+                # ? verify/timeout are passed per request, not on the session
                 response = self.session.get(
                     self.NSE_CONTRACT_URI,
                     timeout = self.timeout,
@@ -337,9 +339,9 @@ class NSEOptionChain:
                 if attempt: # ? second consecutive failure is propagated
                     raise
 
-                # ! a stale/blocked session is discarded and re-warmed once
+                # ! discard the stale/blocked session so the next iteration
+                # re-warms it inside the try, retrying a warm-up failure too
                 self.session = None
-                self.__newsession__()
 
 
     def __newsession__(self) -> None:
@@ -359,9 +361,7 @@ class NSEOptionChain:
         session = requests.Session()
         session.headers.update(self.URI_HEADER)
 
-        # ! verify/timeout must stay per-request - the broken
-        # `CURL_CA_BUNDLE='""'` env var on this machine defeats
-        # session-level verify via merge_environment_settings
+        # ? verify/timeout are passed per request, not on the session
         session.get(
             self.NSE_WARMUP_URI, timeout = self.timeout, verify = self.verify
         )
