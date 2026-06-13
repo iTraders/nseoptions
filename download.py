@@ -45,6 +45,12 @@ from nseoptions import NSEOptionChain
 
 DEFAULT_SYMBOLS = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "FINNIFTY"]
 
+# ! bound the per-fetch retry budget so a stalled NSE endpoint cannot pin
+# a worker thread (and so delay a CTRL + C shutdown) for long - the service
+# re-polls every `interval` regardless, so an individual fetch fails fast
+FETCH_WAITTIME = 5
+FETCH_MAXRETRIES = 3
+
 logger = logging.getLogger("nseoptions.download")
 
 
@@ -227,11 +233,13 @@ async def discoverexpiries(symbol : str, verify : bool) -> list:
     """
 
     api = NSEOptionChain(symbol, verify = verify)
-    api.setconfig()
 
+    # ? `expiries()` configures the instance lazily, so an explicit
+    # `setconfig()` here would only repeat that work
     expiries = await asyncio.to_thread(api.expiries)
 
-    # ! `expiries()` can fall through its retry loop and return None
+    # ! `expiries()` returns a list or raises; the `or []` defends the
+    # empty-discovery case so the orchestrator can skip the symbol
     expiries = expiries or []
     logger.info("%s : discovered %d expiries", symbol, len(expiries))
 
@@ -256,8 +264,11 @@ async def symbol_worker(
     and writes a snapshot only when the market timestamp has advanced
     since the last write. Transient :class:`ValueError` and
     :class:`ConnectionError` failures are logged and retried on the next
-    cycle, while :class:`asyncio.CancelledError` is allowed to propagate
-    for a graceful shutdown.
+    cycle, and any other unexpected error is logged with a traceback so
+    the loop continues, ensuring one bad poll never aborts the fleet. A
+    one-time setup failure (for example a malformed expiry) logs and
+    exits this worker alone, while :class:`asyncio.CancelledError` is
+    allowed to propagate for a graceful shutdown.
 
     :type  symbol: str
     :param symbol: The traded symbol to poll, example ``NIFTY``.
@@ -280,19 +291,35 @@ async def symbol_worker(
     """
 
     api = NSEOptionChain(symbol, verify = verify)
-    api.setconfig()
-    api.setexpiry(expiry)
+
+    # ! isolate one-time setup failures (e.g. a malformed expiry raising
+    # ValueError) to this worker instead of tearing down the service;
+    # `setexpiry()` also lazily loads the configuration
+    try:
+        api.setexpiry(expiry)
+    except Exception as err:
+        logger.error("[%s/%s] setup failed - %s", symbol, expiry, err)
+        return
 
     last_timestamp = None
     while True:
         try:
             async with semaphore:
-                response = await asyncio.to_thread(api.response, 20)
+                response = await asyncio.to_thread(
+                    api.response, FETCH_WAITTIME, FETCH_MAXRETRIES
+                )
 
-            timestamp = response["records"]["timestamp"]
-            if timestamp != last_timestamp:
+            # ? `response()` guarantees only the top-level keys, so the
+            # nested timestamp is read defensively
+            timestamp = response["records"].get("timestamp")
+            if not timestamp:
+                logger.warning(
+                    "[%s/%s] payload missing records.timestamp, skipped",
+                    symbol, expiry
+                )
+            elif timestamp != last_timestamp:
                 # ! recompute the date every cycle so a service running
-                # past midnight rolls over into the new day's directory
+                # past midnight rolls into the new day's directory
                 fetchdate = dt.datetime.now().strftime("%Y-%m-%d")
                 filepath = buildfilepath(
                     outdir, fetchdate, timestamp, symbol, expiry
@@ -308,6 +335,10 @@ async def symbol_worker(
                 )
         except (ValueError, ConnectionError) as err:
             logger.error("[%s/%s] fetch failed - %s", symbol, expiry, err)
+        except Exception:
+            # ! never let one worker's unexpected error abort the fleet;
+            # CancelledError is a BaseException and still propagates
+            logger.exception("[%s/%s] unexpected error", symbol, expiry)
 
         await asyncio.sleep(interval)
 
