@@ -231,36 +231,52 @@ argparse `--symbol`(initial view) `--symbols`(downloadable set, default 5 indice
 main.py; calls `nseoptions.dashboard.launch(...)` which builds settings and `uvicorn.run`s.
 
 ## Phased plan (commit after each; gitmoji; `/python-code-format` + global Python agents)
-> Implementation is **gradual**. Items are unchecked; tick them as completed.
+> **Progress — 2026-06-13. Database integration is deliberately deferred for now.** As a
+> prerequisite, master's v3 data module was merged into `feature/dashboard` (the legacy NSE
+> endpoints are 404, so the branch could not fetch without it). The non-DB slice of the design
+> then landed and is green: backend `pytest` **32 passed**, frontend `vitest` **13 passed**,
+> SPA `npm run build` ok. A `python-code-reviewer` + `python-code-debugger` pass hardened the
+> worker (guarded setup; null-`records` safety). A pre-existing `.gitignore` bug that hid the
+> entire frontend `src/lib` was also fixed. **Everything touching PostgreSQL — the shared
+> `nseoptions/db` package, the real `write_snapshot`, DB-backed reads + the WS tail-poll, and
+> deleting `history.py` — remains deferred.** The worker persists through an injected `sink`
+> (currently a no-op recorder); the DB writer plugs into exactly that seam.
+>
+> Legend: ✅ done · 🟡 partial (non-DB parts done) · ⏸ deferred (database integration).
 
-### Phase A — shared PostgreSQL layer (foundation, no deps)
-- [ ] **A1** `nseoptions/db/{schema.sql,pool.py,__init__.py}` — `option_snapshot` DDL + `create_pool`/`init_schema`. → `✨ add shared postgres db package (pool + schema)`
-- [ ] **A2** `db/writer.py` real `write_snapshot` (ON CONFLICT dedup, stores atm/multiple). → `✨ implement postgres snapshot writer`
-- [ ] **A3** `db/reader.py` (`latest_snapshot`, `available_symbols`, `expiries_for`, `series`, `latest_per`). → `✨ add postgres read queries for the dashboard`
-- [ ] **A4** add `asyncpg>=0.29` to `requirements-dashboard.txt` (+ `pyproject.toml` if aligning with async). → `🤖 declare asyncpg dependency`
+### Phase A — shared PostgreSQL layer (foundation) — ⏸ deferred (database integration)
+- [ ] **A1** ⏸ `nseoptions/db/{schema.sql,pool.py,__init__.py}` — `option_snapshot` DDL + `create_pool`/`init_schema`.
+- [ ] **A2** ⏸ `db/writer.py` real `write_snapshot` (ON CONFLICT dedup, stores atm/multiple).
+- [ ] **A3** ⏸ `db/reader.py` (`latest_snapshot`, `available_symbols`, `expiries_for`, `series`, `latest_per`).
+- [ ] **A4** ⏸ add `asyncpg>=0.29` to `requirements-dashboard.txt`.
 
-### Phase B — async downloader bound to the real DB *(integrate async branch, or build here)*
-- [ ] **B1** `cli.py`/`worker.py` present & importing shared `db`; worker computes `atm`/`multiple` and calls the **real** `write_snapshot`. → `✨ wire async worker to the real postgres writer`
+### Phase B — async downloader bound to the real DB
+- [x] **B1** 🟡 `nseoptions/worker.py` built — reusable async `symbol_worker` over v3 `core` (`setexpiry`/`response`), NSE-timestamp dedup, persistence via an injected `sink`. ⏸ the **real** `write_snapshot` binding is deferred (no-op sink is the seam). Commit `✨ feat(worker)…`.
 
 ### Phase C — dashboard backend → PostgreSQL reader + DownloadManager
-- [ ] **C1** `settings.py`: drop `db_path`; add pg_* (or `database_url`), `symbols`, `max_concurrent`; `symbol`/`expiry` become view defaults. → `♻️ settings: postgres connection + symbol selection`
-- [ ] **C2** `downloader.py`: `DownloadManager` (start/stop/status over worker tasks + semaphore + pool). → `✨ add in-process download manager (fetch-data control)`
-- [ ] **C3** `service.py`: remove poller/cookie-priming/SQLite hooks; build chain/meta from DB; WS via DB tail-poll. → `♻️ service: read snapshots from postgres, drop the bespoke poller`
-- [ ] **C4** `schemas.py`: v3 leg fields + `SymbolsOut`/`FetchRequest`/`FetchStatus` + `symbol` on `PayoffIn` + freshness flags. → `♻️ schemas: v3 leg fields + fetch-control contract`
-- [ ] **C5** `server.py`: pool lifespan + `init_schema`; read-service + `DownloadManager`; `/api/symbols` + `/api/fetch/{start,stop,status}`; `symbol` param on routes; WS symbol+expiry; remove `HistoryStore`. → `♻️ server: postgres-backed routes + fetch-data endpoints`
-- [ ] **C6** delete `history.py`. → `🔥 remove sqlite history store (superseded by postgres)`
-- [ ] **C7** `dashboard.py` + `__init__.launch`: DB args + `--symbols` + `--max-concurrent`. → `♻️ launcher: postgres + downloader controls`
+- [x] **C1** 🟡 `settings.py`: added `symbols` + `max_concurrent`; `symbol`/`expiry` stay view defaults. ⏸ pg_* connection + dropping `db_path` deferred. Commit `🛠️ refactor(settings)…`.
+- [x] **C2** ✅ `downloader.py`: `DownloadManager` start/stop/status over worker tasks + shared semaphore (background bootstrap, lock-guarded). Commit `✨ feat(dashboard): … download manager`.
+- [ ] **C3** ⏸ deferred (DB): `service.py` DB reads + WS tail-poll; the existing poller/SQLite stays for now.
+- [x] **C4** ✅ `schemas.py`: v3 leg fields + `SymbolInfo/SymbolsOut/FetchRequest/WorkerStatus/FetchStatus`. (`PayoffIn.symbol` already present; freshness flags ⏸ with DB reads.) Commits `🛠️ refactor(dashboard): … v3` + `✨ feat(dashboard): fetch-control schemas`.
+- [x] **C5** 🟡 `server.py`: `DownloadManager` in lifespan + `/api/symbols` + `/api/fetch/{start,stop,status}`. ⏸ postgres-backed routes / removing `HistoryStore` deferred. Commit `✨ feat(server)…`.
+- [ ] **C6** ⏸ deferred (DB): delete `history.py` (kept until DB reads replace it).
+- [x] **C7** 🟡 `dashboard.py` + `__init__.launch`: `--symbols` + `--max-concurrent`. ⏸ pg args deferred. Commit `🛠️ refactor(cli)…`.
 
 ### Phase D — frontend → multi-symbol + Fetch Data
-- [ ] **D1** `types/contract.ts`: v3 leg fields + fetch/symbol types. → `♻️ frontend contract: v3 leg fields + fetch types`
-- [ ] **D2** store symbol/download state + `useSymbols`/`useFetchControl`; add `symbol` to existing hooks. → `✨ frontend: symbol selection + fetch-control hooks`
-- [ ] **D3** `SymbolSelector` + `FetchDataButton` (start/stop + status) + `DownloadStatus` + standby/empty state. → `✨ frontend: symbol selector + fetch-data button`
-- [ ] **D4** wire panels to symbol-scoped, postgres-backed data; WS with symbol. → `♻️ frontend: scope panels to selected symbol`
+- [x] **D1** ✅ `types/contract.ts`: v3 leg fields + fetch/symbol types. Commits `🛠️ refactor(frontend)…` + the feature commit.
+- [x] **D2** ✅ store `selectedSymbols` + `useSymbols`/`useFetchControl`. (Scoping existing hooks by `symbol` ⏸ with DB reads.) Commit `✨ feat(frontend)…`.
+- [x] **D3** ✅ `SymbolSelector` + `FetchDataButton` (start/stop + live worker badge) in the header. (Full chain-panel standby/empty-state ⏸ with DB reads.) Commit `✨ feat(frontend)…`.
+- [ ] **D4** ⏸ deferred (DB): scope panels to the selected symbol over DB-backed data + WS.
 
 ### Phase E — tests, docs, polish
-- [ ] **E1** backend tests: writer upsert/dedup, reader `ChainOut` + history series, `DownloadManager` start/stop (fixtures + fake/integration pool). → `✅ backend tests for postgres writer/reader + manager`
-- [ ] **E2** frontend tests: `SymbolSelector`/`FetchDataButton` states, MSW fetch endpoints; `HeatCell` snapshot unchanged. → `✅ frontend tests for fetch-data controls`
-- [ ] **E3** README dashboard section (postgres setup, fetch flow) + mark plan statuses. → `📝 document the postgres-backed dashboard + fetch flow`
+- [x] **E1** 🟡 `tests/test_downloader.py`: `/api/symbols`, idle status, `DownloadManager` start/stop, and worker survival on a null-`records` payload. ⏸ writer/reader DB tests deferred.
+- [x] **E2** ✅ `FetchDataButton.test.tsx` (idle vs running); `HeatCell`/`OptionChainTable` snapshots unchanged and green.
+- [ ] **E3** 🟡 plan statuses updated (this section). ⏸ README postgres/fetch-flow section deferred.
+
+### Prerequisite + incidental (this session)
+- [x] ✅ merge master (NSE v3 API migration) into `feature/dashboard` — clean, disjoint files. Commit `🔀 merge master …`.
+- [x] ✅ fix `.gitignore` hiding the entire frontend `src/lib` (anchored the python `lib/` rule) + tracked the layer. Commit `🐛 fix(gitignore)…`.
+- [x] ✅ `python-code-reviewer` + `python-code-debugger` review → worker hardening. Commit `🐛 fix(worker)…`.
 
 ## Verification
 - Local PostgreSQL up; `python dashboard.py --pg-host localhost --pg-database nseoptions --pg-user … --no-verify`
