@@ -38,6 +38,8 @@ if __name__ == "__main__":
     parser.add_argument("--port", default = 8000, type = int, help = "Server bind port.")
     parser.add_argument("--interval", default = 30, type = int, help = "NSE poll interval, in seconds.")
     parser.add_argument("--nstrikes", default = 20, type = int, help = "Strikes above/below the ATM to serve.")
+    parser.add_argument("--symbols", default = None, nargs = "+", type = str, help = "Downloadable symbols for Fetch Data (default: indices).")
+    parser.add_argument("--max-concurrent", dest = "max_concurrent", default = 3, type = int, help = "Cap on concurrent NSE fetches.")
     parser.add_argument("--dev", action = "store_true", help = "Dev mode: enable CORS for the Vite dev server, skip the SPA.")
     parser.add_argument(
         "--no-verify",
@@ -58,5 +60,7 @@ if __name__ == "__main__":
         verify = args.verify,
         interval = args.interval,
         nstrikes = args.nstrikes,
+        symbols = args.symbols,
+        max_concurrent = args.max_concurrent,
         dev = args.dev
     )

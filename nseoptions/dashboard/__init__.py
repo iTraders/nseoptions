@@ -23,15 +23,17 @@ lazy so importing this package stays cheap.
 
 
 def launch(
-    symbol   : str = "NIFTY",
-    expiry   : str | None = None,
-    host     : str = "127.0.0.1",
-    port     : int = 8000,
-    verify   : bool = False,
-    interval : int = 30,
-    nstrikes : int = 20,
-    dev      : bool = False,
-    reload   : bool = False
+    symbol         : str = "NIFTY",
+    expiry         : str | None = None,
+    host           : str = "127.0.0.1",
+    port           : int = 8000,
+    verify         : bool = False,
+    interval       : int = 30,
+    nstrikes       : int = 20,
+    dev            : bool = False,
+    reload         : bool = False,
+    symbols        : list | tuple | None = None,
+    max_concurrent : int = 3
 ) -> None:
     """
     Boot the uvicorn server that serves the ReactJS dashboard.
@@ -51,6 +53,11 @@ def launch(
         * **nstrikes** (*int*) - Strikes above/below the ATM to serve.
         * **dev** (*bool*) - Enable CORS for the Vite dev server.
         * **reload** (*bool*) - Enable uvicorn auto-reload (development).
+        * **symbols** (*list*) - The downloadable symbol universe for the
+          "Fetch Data" control. When :obj:`None` the AppSettings default
+          (the v1 index universe) is used.
+        * **max_concurrent** (*int*) - Cap on concurrent NSE fetches
+          shared across the download workers. Defaults to 3.
     """
 
     import uvicorn # local import keeps the package import cheap
@@ -58,11 +65,19 @@ def launch(
     from nseoptions.dashboard.server import create_app
     from nseoptions.dashboard.settings import AppSettings
 
-    settings = AppSettings(
+    options = dict(
         symbol = symbol.upper(), expiry = expiry,
         host = host, port = port, verify = verify,
-        interval = interval, nstrikes = nstrikes, dev = dev
+        interval = interval, nstrikes = nstrikes, dev = dev,
+        max_concurrent = max_concurrent
     )
+
+    # ? only override the symbol universe when the caller supplies one,
+    # ? otherwise the immutable AppSettings default (indices) applies
+    if symbols:
+        options["symbols"] = tuple(sym.upper() for sym in symbols)
+
+    settings = AppSettings(**options)
 
     app = create_app(settings)
     uvicorn.run(app, host = settings.host, port = settings.port, reload = reload)
