@@ -23,12 +23,14 @@ export default defineConfig({
     chunkSizeWarningLimit: 700,
     rollupOptions: {
       output: {
-        // Split heavy vendors into separately cacheable chunks.
+        // Split only the heavy chart stack into its own cacheable chunk.
+        // React MUST stay with its consumers (radix, etc.) in one chunk,
+        // otherwise a cross-chunk load-order race breaks React.forwardRef.
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
-          if (/recharts|d3-|react-smooth|victory-vroom/.test(id)) return "charts";
-          if (/react-dom|scheduler|\/react\//.test(id)) return "react";
-          if (/@tanstack|zustand/.test(id)) return "query";
+          if (/recharts|\/d3-|d3-[a-z]|react-smooth|victory-vroom|internmap/.test(id)) {
+            return "charts";
+          }
           return "vendor";
         },
       },
