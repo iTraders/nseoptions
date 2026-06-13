@@ -144,10 +144,18 @@ async def symbol_worker(
     :return: The coroutine only returns when cancelled.
     """
 
-    api = NSEOptionChain(symbol, verify = verify, timeout = timeout)
+    try:
+        api = NSEOptionChain(symbol, verify = verify, timeout = timeout)
 
-    # ! build the v3 api uri (and lazily the config) off the event loop
-    await asyncio.to_thread(api.setexpiry, expiry)
+        # ! build the v3 api uri (and lazily the config) off the event loop
+        await asyncio.to_thread(api.setexpiry, expiry)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        # ! a setup failure (bad expiry, unreadable config) is terminal for
+        # ! this worker - surface it instead of dying silently as "starting"
+        _report(on_status, symbol, expiry, state = "error", detail = str(exc))
+        return
 
     last_seen : str | None = None
     while True:
@@ -161,8 +169,11 @@ async def symbol_worker(
             await asyncio.sleep(interval)
             continue
 
-        # ? skip processing entirely when the chain has not changed yet
-        timestamp = response.get("records", {}).get("timestamp")
+        # ? skip processing entirely when the chain has not changed yet;
+        # ! guard a null `records` (only key presence is validated upstream)
+        # ! so this read between the two try blocks can never raise
+        records = response.get("records") or {}
+        timestamp = records.get("timestamp")
         if timestamp is not None and timestamp == last_seen:
             await asyncio.sleep(interval)
             continue

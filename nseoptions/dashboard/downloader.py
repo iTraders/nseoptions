@@ -109,7 +109,6 @@ class DownloadManager:
 
             self._symbols    = chosen
             self._started_at = dt.datetime.now()
-            self._status     = {}
             self._running    = True
 
             self._bootstrap = asyncio.create_task(self.__bootstrap__(chosen))
@@ -169,6 +168,7 @@ class DownloadManager:
 
         self._bootstrap = None
         self._tasks = {}
+        self._status = {} # ! a stopped/restarted manager reports no workers
 
 
     async def __bootstrap__(self, symbols : tuple) -> None:

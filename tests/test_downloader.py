@@ -83,3 +83,37 @@ def test_download_manager_start_then_stop() -> None:
     assert {item.expiry for item in status.workers} == {"26-Jun-2025", "03-Jul-2025"}
     assert all(item.state == "ok" and item.snapshots == 1 for item in status.workers)
     assert manager.running is False and manager._tasks == {}
+
+
+def test_worker_survives_null_records_payload() -> None:
+    from nseoptions import worker
+
+    class NullRecordsAPI:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def setexpiry(self, expiry : str) -> str:
+            return expiry
+
+        def response(self, waittime : int, maxretries : int) -> dict:
+            return {"records" : None, "filtered" : None}
+
+    async def sink(*args) -> None:
+        return None
+
+    async def scenario() -> bool:
+        semaphore = asyncio.Semaphore(1)
+        with patch.object(worker, "NSEOptionChain", NullRecordsAPI):
+            task = asyncio.create_task(worker.symbol_worker(
+                "NIFTY", "26-Jun-2025", semaphore, sink, interval = 0
+            ))
+            await asyncio.sleep(0.05) # let the loop spin past the null read
+            alive = not task.done()
+
+            task.cancel()
+            await asyncio.gather(task, return_exceptions = True)
+            return alive
+
+    # ! a null `records` must not kill the worker (it used to raise an
+    # ! AttributeError in the unguarded gap between the two try blocks)
+    assert asyncio.run(scenario()) is True
