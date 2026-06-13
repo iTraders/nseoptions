@@ -22,6 +22,8 @@ from dataclasses import dataclass
 
 import nseoptions # registers ROOT/CONFIG, exposes the public api
 
+from nseoptions.worker import DEFAULT_SYMBOLS # the v1 index download universe
+
 # ! the repository base directory is the parent of the package root,
 # ! this is where the (git-ignored) `output/` directory already lives
 BASE_DIR = os.path.dirname(nseoptions.ROOT)
@@ -57,6 +59,13 @@ class AppSettings:
 
         * **dev** (*bool*) - Enable CORS for the Vite dev server and skip
           mounting the built SPA. Defaults to :obj:`False`.
+
+        * **symbols** (*tuple*) - The catalogue of symbols the dashboard
+          may download via the ``Fetch Data`` control. Defaults to the v1
+          index universe (:data:`nseoptions.worker.DEFAULT_SYMBOLS`).
+
+        * **max_concurrent** (*int*) - The cap on concurrent NSE fetches
+          shared across every download worker. Defaults to 3.
     """
 
     symbol     : str = "NIFTY"
@@ -67,6 +76,11 @@ class AppSettings:
     interval   : int = 30
     nstrikes   : int = 20
     dev        : bool = False
+
+    # ? asynchronous downloader controls - the "Fetch Data" universe and
+    # ? the shared concurrency cap consumed by the download manager
+    symbols        : tuple = DEFAULT_SYMBOLS
+    max_concurrent : int = 3
 
     # ? transport + analytics tunables, sensible defaults for india
     timeout    : int = 12     # per-request timeout (seconds) for the nse fetch
