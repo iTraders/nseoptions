@@ -308,6 +308,31 @@ The application-layer check is the performance guard; the DB constraint is the c
 
 Progress tracking for v1 MVP development. Check off items as they are completed.
 
+### Phase 0 (delivered 2026-06-13): Download-Only Async Service (`download.py`)
+
+> `download.py` is the standalone download-only precursor to the planned `cli.py` +
+> `worker.py`. It implements the full asynchronous fetch / dedup / archive pipeline minus
+> the database: fresh snapshots are written to
+> `output/<date>/<timestamp>-<symbol>-<expiry>.json`. The expiry is part of the filename
+> because NSE returns the same `records.timestamp` for every expiry of a symbol in one poll
+> cycle (omitting it would collide on disk - confirmed live: 18 expiries shared one
+> timestamp). It will later be split into `cli.py` + `worker.py`, swapping `db.write_snapshot`
+> in for the JSON file writer. Built with the global Python agents
+> (`python-code-planning` -> implement -> `python-code-reviewer` ∥ `python-code-debugger` ->
+> `python-code-optimization`).
+
+- [x] argparse CLI: `--symbols`, `--interval`, `--max-concurrent`, `--no-verify`, `--output` (DB args deferred)
+- [x] Reproduce `main.py` `--no-verify` behaviour (warn once + silence urllib3 spam)
+- [x] `asyncio.to_thread()` wrapper over sync `NSEOptionChain.response()` (no aiohttp rewrite)
+- [x] Shared `asyncio.Semaphore(--max-concurrent)` bounding only the fetch (not the sleep)
+- [x] One coroutine per `(symbol, expiry)`; per-coroutine NSE-timestamp dedup
+- [x] Concurrent expiry discovery with partial-failure tolerance (`gather(return_exceptions=True)`)
+- [x] Archive to `output/<date>/<timestamp>-<symbol>-<expiry>.json` (date recomputed per cycle for midnight rollover)
+- [x] Worker resilience: transient + unexpected errors logged-and-retried; one-time setup isolated; graceful Ctrl+C cancel/teardown with a bounded per-fetch retry budget (`FETCH_WAITTIME`/`FETCH_MAXRETRIES`)
+- [x] Agent review pass applied (resilience + shutdown + DRY fixes)
+- [x] Verified: `py_compile`, `--help`, flake8 clean under the skill ruleset, and a live bounded smoke test (18 NIFTY expiries -> 18 distinct snapshots, clean cancellation without hang)
+- [ ] (deferred) DB integration: replace `writesnapshot` with `db.write_snapshot`; split into `cli.py` + `worker.py`
+
 ### Phase 1: Project Setup
 - [ ] Create `pyproject.toml` at repo root with all build config and dependencies (commit: `feat(build): add pyproject.toml`)
 - [ ] Verify `pip install -e .` works and `nseoptions --help` is accessible
