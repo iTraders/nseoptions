@@ -2,15 +2,29 @@
 
 """
 Main File to Fetch NSE India Options Chain Data
+
+The core module exposes :class:`NSEOptionChain` which discovers the
+valid contract expiry dates and fetches the option chain payload for
+a traded symbol (index/stock) from the NSE India public API.
+
+:NOTE: As on 2026-06-12 the NSE decommissioned the legacy
+    ``option-chain-indices``/``option-chain-equities`` endpoints (now
+    HTTP 404) and the module is migrated to the ``option-chain-v3``
+    API which mandates an expiry date per request. Valid expiries are
+    discovered via :meth:`NSEOptionChain.expiries` and set using
+    :meth:`NSEOptionChain.setexpiry` before fetching the chain.
 """
 
 import time
+import datetime as dt
+
 import yaml
 import requests
 
 from tqdm import tqdm as TQ
 
 from nseoptions import CONFIG
+from nseoptions.processing import normalizeexpiry
 
 
 class NSEOptionChain:
@@ -33,8 +47,11 @@ class NSEOptionChain:
     :type  expiry: str or dt.date
     :param expiry: A valid expiration date of the given symbol. If the
         date is an instance of string the it must be of the date style
-        :attr:`%d-%b-%Y` or can be a date.
-    
+        :attr:`%d-%b-%Y` or can be a date. The value is optional at
+        initialization and can be set (or rolled over) at any time
+        using :meth:`setexpiry`, while the valid dates for the symbol
+        are discovered using :meth:`expiries`. Defaults to None.
+
     Keyword Arguments
     -----------------
 
@@ -58,47 +75,107 @@ class NSEOptionChain:
           data from the internet. Always recommended to be True, but
           in case of legacy/restricted systems this option comes in
           handy. Defaults to False.
+
+        * **timeout** (*int*) - Per-request timeout (in seconds) for
+          every GET call to the NSE India website, since the website
+          may hang indefinitely on blocked requests. Defaults to 15.
     """
 
-    def __init__(self, symbol : str, **kwargs) -> None:
+    # ..versionchanged:: 2026-06-12 Migrate to NSE v3 Option Chain API
+    def __init__(
+        self, symbol : str, expiry : str | dt.date | None = None, **kwargs
+    ) -> None:
         self.symbol = symbol.upper()
+
+        # ? expiry is optional at init, can be set later via `setexpiry()`
+        self.expiry = normalizeexpiry(expiry) if expiry else None
 
         # keyword arguments parsed from cli/object initialization
         self.verify = kwargs.get("verify", False)
+        self.timeout = kwargs.get("timeout", 15)
+
+        # ? session is created lazily by `__newsession__()` on first fetch
+        self.session = None
 
 
-    def response(self, waittime : int = 10) -> dict:
+    # ..versionchanged:: 2026-06-12 Warmed Session, Timeout and Capped Retries
+    def response(self, waittime : int = 10, maxretries : int = 30) -> dict:
         """
-        Session Object for the NSE Option Chain Data
+        Fetch the Option Chain JSON Payload from the NSE v3 API
 
-        The function returns a session object to fetch the data from the
-        NSE India website. The session object is used to fetch the data
-        from the website using the API URI.
+        The function fetches the option chain data for the configured
+        symbol and expiry from the NSE India website using a warmed-up
+        persistent session (see :meth:`__newsession__`). On any failure
+        the session is discarded (to force a fresh cookie warm-up) and
+        the request is retried after a countdown of ``waittime``
+        seconds, for a maximum of ``maxretries`` attempts. With the
+        defaults of :mod:`main` (``waittime = 20``) the retry budget
+        tolerates roughly a 10 minute NSE outage before giving up.
 
-        The session object is created using the `requests` module and
-        the headers are set to mimic a browser request to the website.
+        :type  waittime: int
+        :param waittime: Number of seconds to sleep (with a visual
+            ``tqdm`` countdown) between two consecutive retries when
+            the fetch fails. Defaults to 10.
+
+        :type  maxretries: int
+        :param maxretries: Maximum number of fetch attempts before the
+            function gives up and raises an error. Defaults to 30.
+
+        :raises ValueError: If the expiry is not yet set for the
+            object, i.e., :meth:`setexpiry` was never called and no
+            expiry was passed during initialization.
+        :raises ConnectionError: If the data could not be fetched even
+            after ``maxretries`` attempts.
+
+        :rtype:  dict
+        :return: The raw v3 option chain payload, with the top level
+            keys ``records`` and ``filtered`` as returned by the API.
         """
 
-        fetched, count = False, 0
-        while not fetched:
+        if self.expiry is None or not hasattr(self, "NSE_API_URI"):
+            raise ValueError("expiry not set - call setexpiry() before response()")
+
+        for count in range(1, maxretries + 1):
             try:
-                session = requests.Session().get(
+                if self.session is None:
+                    self.__newsession__()
+
+                # ? verify/timeout are passed per request, not on the session
+                session_response = self.session.get(
                     self.NSE_API_URI,
                     headers = self.URI_HEADER,
+                    timeout = self.timeout,
                     verify = self.verify
                 )
-                response = session.json()
+                session_response.raise_for_status()
+                response = session_response.json()
 
-                fetched = True # exit the loop if json is fetched
+                # ? sanity check the payload before returning to caller
+                if "records" not in response or "filtered" not in response:
+                    raise ValueError("malformed v3 response, missing records/filtered")
+
+                return response
+            except KeyboardInterrupt:
+                raise # ? allow a clean ctrl+c exit mid-fetch, no retry
             except Exception as e:
-                count += 1 # track number of times the fetch fails
+                self.session = None # ! forces cookie re-warm on next attempt
                 print(f"{time.ctime()} : Failed to Fetch Data - {e}")
 
-                _ = [time.sleep(1) for _ in TQ(range(waittime), desc = f"#{count + 1} Retrying...")]
+                # ! on the last attempt, chain the cause and skip the wait
+                if count == maxretries:
+                    raise ConnectionError(
+                        f"NSE v3 fetch failed after {maxretries} attempts"
+                    ) from e
 
-        return response
+                _ = [
+                    time.sleep(1)
+                    for _ in TQ(range(waittime), desc = f"#{count} Retrying...")
+                ]
+
+        raise ConnectionError(f"NSE v3 fetch failed after {maxretries} attempts")
 
 
+    # ..versionchanged:: 2026-06-12 Migrate to NSE v3 Option Chain API
     def setconfig(self, file : str = CONFIG, type : str = "index", **kwargs) -> dict:
         """
         Configuration Data for the NSE Option Chain Module
@@ -107,6 +184,12 @@ class NSEOptionChain:
         at the base of the module. However, the user can set and update
         any part of the configuration by passing the file path or
         passing the individual values.
+
+        The chain endpoint is the NSE v3 template which carries both a
+        ``{symbol}`` and an ``{expiry}`` placeholder - the template is
+        stored unformatted and is resolved into the final API URI by
+        :meth:`setexpiry` (or immediately, if the expiry is already
+        known at the time of configuration).
 
         :type  file: str
         :param file: The file path to the configuration file. The file
@@ -128,15 +211,23 @@ class NSEOptionChain:
             * **header** (*dict*) - The header information to be passed
                 while fetching the data from the NSE India website.
 
-            * **apiuri** (*str*) - The API URI to fetch the data from
-                the NSE India website. The default is set to None.
+            * **apiuri** (*str*) - The API URI template to fetch the
+                data from the NSE India website, with the ``{symbol}``
+                and ``{expiry}`` placeholders. The default is set to
+                None, i.e., use the template from the configuration.
+
+        :rtype:  dict
+        :return: The full parsed configuration, for debugging and
+            developer usage.
         """
 
+        # ? `type` shadows the builtin but is kept for backward compatibility
         header = kwargs.get("header", None)
         apiuri = kwargs.get("apiuri", None)
 
         # todo: check if file exists, and file is not None
-        config = yaml.load(open(file, "r"), Loader = yaml.FullLoader)
+        with open(file, "r") as f:
+            config = yaml.safe_load(f)
 
         # ? update any part of the configuration if passed by enduser
         config["config"]["header"] = header if header else config["config"]["header"]
@@ -144,12 +235,135 @@ class NSEOptionChain:
         # ! set the global header for the model, will not change on run
         self.URI_HEADER = config["config"]["header"]
 
-        # ! the global url for the model is two part, either use the
-        # default or set the new one as given by the end user argument
         configuri = config["config"]["uri"]
-        self.NSE_API_URI = apiuri if apiuri else \
+
+        # ? cookie warm-up page and expiry discovery endpoint for symbol
+        self.NSE_WARMUP_URI = configuri.get(
+            "warmup", "https://www.nseindia.com/option-chain"
+        )
+        self.NSE_CONTRACT_URI = (configuri["base"] + configuri["contract"]).format(
+            symbol = self.symbol
+        )
+
+        # ! the chain template is stored unformatted since the v3 api
+        # mandates an expiry per request, resolved via `setexpiry()`
+        self._apiuri = apiuri if apiuri else \
             configuri["base"] + configuri["type"][type]
 
-        self.NSE_API_URI = self.NSE_API_URI.format(symbol = self.symbol)
+        if self.expiry:
+            self.NSE_API_URI = self._apiuri.format(
+                symbol = self.symbol, expiry = self.expiry
+            )
 
         return config # return everything for debugging, developer usage
+
+
+    def setexpiry(self, expiry : str | dt.date) -> str:
+        """
+        Set or Update the Contract Expiry Date for the Option Chain
+
+        The NSE v3 option chain API mandates an expiry date for each
+        request, hence the expiry can be set (or updated, for example
+        to roll over to the next contract) any time after the object
+        creation. Valid dates for the symbol can be discovered using
+        :meth:`expiries`, and the final API URI is (re)built from the
+        unformatted template stored by :meth:`setconfig`.
+
+        :type  expiry: str or dt.date
+        :param expiry: A valid expiration date of the given symbol. If
+            the date is an instance of string then it must be of the
+            date style :attr:`%d-%b-%Y` (example ``16-Jun-2026``), or
+            can be a date or datetime instance.
+
+        :raises ValueError: If the expiry string does not conform to
+            the expected :attr:`%d-%b-%Y` format, as raised by the
+            :func:`nseoptions.processing.normalizeexpiry` function.
+
+        :rtype:  str
+        :return: The canonical expiry string, i.e., zero-padded day
+            and title-case month, exactly as reported by the NSE API.
+        """
+
+        self.expiry = normalizeexpiry(expiry)
+
+        # ? lazily load the default configuration if not already set
+        if not hasattr(self, "_apiuri"):
+            self.setconfig()
+
+        self.NSE_API_URI = self._apiuri.format(
+            symbol = self.symbol, expiry = self.expiry
+        )
+
+        return self.expiry
+
+
+    def expiries(self) -> list[str]:
+        """
+        Discover the Available Contract Expiry Dates for the Symbol
+
+        The list of valid expiry dates for the configured symbol is
+        fetched from the NSE ``option-chain-contract-info`` endpoint,
+        which exposes the top level keys ``expiryDates`` and
+        ``strikePrice``. On the first failure the session is discarded
+        and re-warmed (see :meth:`__newsession__`) and the request is
+        retried once, while a second consecutive failure is propagated
+        to the caller.
+
+        :raises Exception: The underlying :mod:`requests` exception,
+            HTTP error, or JSON decoding error is propagated if the
+            discovery fails even after a retry with a fresh session.
+
+        :rtype:  list
+        :return: List of expiry date strings (:attr:`%d-%b-%Y` format,
+            example ``16-Jun-2026``) as reported by the NSE India API.
+        """
+
+        # ? lazily load the default configuration if not already set
+        if not hasattr(self, "NSE_CONTRACT_URI"):
+            self.setconfig()
+
+        for attempt in range(2):
+            try:
+                if self.session is None:
+                    self.__newsession__()
+
+                # ? verify/timeout are passed per request, not on the session
+                response = self.session.get(
+                    self.NSE_CONTRACT_URI,
+                    timeout = self.timeout,
+                    verify = self.verify
+                )
+                response.raise_for_status()
+                return response.json()["expiryDates"]
+            except Exception:
+                if attempt: # ? second consecutive failure is propagated
+                    raise
+
+                # ! discard the stale/blocked session so the next iteration
+                # re-warms it inside the try, retrying a warm-up failure too
+                self.session = None
+
+
+    def __newsession__(self) -> None:
+        """
+        Create a New Warmed-Up Session for the NSE India Website
+
+        The NSE India website is protected by akamai bot protection and
+        the API endpoints respond only when the request carries cookies
+        (``_abck``, ``bm_sz``, ``nsit``, etc.) set by a regular page
+        visit. The method creates a fresh :class:`requests.Session`
+        with the configured browser-like headers and performs a warm-up
+        GET on the option chain page to collect the cookies. Exceptions
+        are deliberately not handled here and bubble up to the retry
+        handler of the calling method.
+        """
+
+        session = requests.Session()
+        session.headers.update(self.URI_HEADER)
+
+        # ? verify/timeout are passed per request, not on the session
+        session.get(
+            self.NSE_WARMUP_URI, timeout = self.timeout, verify = self.verify
+        )
+
+        self.session = session
