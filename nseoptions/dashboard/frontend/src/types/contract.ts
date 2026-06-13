@@ -18,10 +18,10 @@ export interface LegQuote {
   pChange: number;
   totalBuyQuantity: number;
   totalSellQuantity: number;
-  bidQty: number;
-  bidprice: number;
-  askQty: number;
-  askPrice: number;
+  buyQuantity1: number;
+  buyPrice1: number;
+  sellQuantity1: number;
+  sellPrice1: number;
 }
 
 export interface StrikeRow {

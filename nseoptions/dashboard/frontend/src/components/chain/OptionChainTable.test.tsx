@@ -17,10 +17,10 @@ function quote(overrides: Partial<LegQuote> = {}): LegQuote {
     pChange: 0,
     totalBuyQuantity: 0,
     totalSellQuantity: 0,
-    bidQty: 0,
-    bidprice: 0,
-    askQty: 0,
-    askPrice: 0,
+    buyQuantity1: 0,
+    buyPrice1: 0,
+    sellQuantity1: 0,
+    sellPrice1: 0,
     ...overrides,
   };
 }
