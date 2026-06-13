@@ -276,7 +276,12 @@ class OptionChainService:
             # ! primed path failed (cookie expiry/block) -> reprime + fallback
             print(f"{time.ctime()} : Primed Fetch Failed - {e}; using core fallback")
             self._prime_cookies()
-            return self._api.response(waittime = self.settings.waittime)
+
+            payload = self._api.response(waittime = self.settings.waittime)
+            if not payload.get("records"):
+                # ! never cache a records-less payload (turns 503s into 500s)
+                raise ValueError("empty or blocked nse fallback response")
+            return payload
 
 
     async def poll_forever(self) -> None:
@@ -290,8 +295,7 @@ class OptionChainService:
                 self._fetched_at = dt.datetime.now()
                 self._status, self._detail = "live", None
 
-                self._persist() # write per-strike history for the primary expiry
-                await self._broadcast_tick()
+                await self._tick(payload) # build off-loop, persist + fan out
             except Exception as e:
                 self._status, self._detail = "degraded", str(e)
                 print(f"{time.ctime()} : Poll Error - {e}")
@@ -372,19 +376,42 @@ class OptionChainService:
         return self._response
 
 
-    def _persist(self) -> None:
-        """Write the primary-expiry chain to the history store, if any."""
+    async def _tick(self, response : dict) -> None:
+        """
+        Process one poll: build the needed snapshots in a worker thread,
+        persist the primary one and broadcast to every client.
 
-        if not self._history or self._response is None:
-            return
+        All pandas work (``makeclean``) and the SQLite write are offloaded
+        via :func:`asyncio.to_thread` so the event loop (and thus every
+        other client + HTTP route) is never blocked.
+        """
 
-        try:
-            chain = assemble_chain(
-                self._response, self.symbol, self.settings.expiry, self.settings.nstrikes
-            )
-            self._history.write(chain)
-        except Exception as e:
-            print(f"{time.ctime()} : History Write Failed - {e}")
+        primary = resolve_expiry(response, self.settings.expiry)
+        wanted  = {primary, *self._clients.values()} # distinct expiries to build
+
+        built = await asyncio.to_thread(self._build_many, response, wanted)
+
+        if self._history is not None and built.get(primary) is not None:
+            await asyncio.to_thread(self._history.write, built[primary])
+
+        await self._broadcast_built(built, response)
+
+
+    def _build_many(self, response : dict, expiries : set) -> dict:
+        """Assemble chains for several expiries in one worker thread."""
+
+        chains : dict = {}
+        for expiry in expiries:
+            if not expiry:
+                continue
+            try:
+                chains[expiry] = assemble_chain(
+                    response, self.symbol, expiry, self.settings.nstrikes
+                )
+            except Exception as e:
+                print(f"{time.ctime()} : Build Failed for {expiry} - {e}")
+
+        return chains
 
 
     # -------- websocket connection management + fan-out -------- #
@@ -402,7 +429,7 @@ class OptionChainService:
             return
 
         try:
-            chain = self.build_chain(self._clients[websocket])
+            chain = await asyncio.to_thread(self.build_chain, self._clients[websocket])
             await self._send(websocket, schemas.SocketMessage(type = "snapshot", chain = chain))
         except Exception as e:
             await self._send(websocket, schemas.SocketMessage(
@@ -430,26 +457,25 @@ class OptionChainService:
             return
 
         try:
-            chain = self.build_chain(self._clients.get(websocket))
+            chain = await asyncio.to_thread(self.build_chain, self._clients.get(websocket))
             await self._send(websocket, schemas.SocketMessage(type = "snapshot", chain = chain))
         except Exception:
             self.disconnect(websocket)
 
 
-    async def _broadcast_tick(self) -> None:
-        """Fan out the latest tick, building each distinct expiry once."""
+    async def _broadcast_built(self, built : dict, response : dict) -> None:
+        """Fan out pre-built snapshots to each client by its subscribed expiry."""
 
         if not self._clients:
             return
 
-        cache : dict = {} # expiry -> ChainOut, built lazily and reused
-        dead  : list = []
-
+        dead : list = []
         for websocket, expiry in list(self._clients.items()):
+            chain = built.get(expiry) or built.get(resolve_expiry(response, expiry))
+            if chain is None:
+                continue
             try:
-                if expiry not in cache:
-                    cache[expiry] = self.build_chain(expiry)
-                await self._send(websocket, schemas.SocketMessage(type = "tick", chain = cache[expiry]))
+                await self._send(websocket, schemas.SocketMessage(type = "tick", chain = chain))
             except Exception:
                 dead.append(websocket)
 

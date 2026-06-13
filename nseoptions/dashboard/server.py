@@ -32,11 +32,11 @@ from nseoptions.dashboard.settings import AppSettings
 from nseoptions.dashboard.service import OptionChainService, NoDataError
 
 
-def _require_chain(service : OptionChainService, expiry : str | None) -> schemas.ChainOut:
-    """Build a chain or raise a 503 while the first poll is still pending."""
+async def _require_chain(service : OptionChainService, expiry : str | None) -> schemas.ChainOut:
+    """Build a chain off-loop, or raise a 503 while the first poll is pending."""
 
     try:
-        return service.build_chain(expiry)
+        return await asyncio.to_thread(service.build_chain, expiry)
     except NoDataError:
         raise HTTPException(status_code = 503, detail = "option chain not ready yet")
 
@@ -91,7 +91,7 @@ def create_app(settings : AppSettings) -> FastAPI:
 
     @app.get("/api/chain", response_model = schemas.ChainOut)
     async def chain(request : Request, expiry : str | None = None) -> schemas.ChainOut:
-        return _require_chain(request.app.state.service, expiry)
+        return await _require_chain(request.app.state.service, expiry)
 
     @app.get("/api/history", response_model = schemas.HistoryOut)
     async def history(
@@ -108,16 +108,18 @@ def create_app(settings : AppSettings) -> FastAPI:
     @app.get("/api/analytics", response_model = schemas.AnalyticsOut)
     async def analytics_route(request : Request, expiry : str | None = None) -> schemas.AnalyticsOut:
         service = request.app.state.service
-        snapshot = _require_chain(service, expiry)
-        return analytics.build_analytics(
+        snapshot = await _require_chain(service, expiry)
+        return await asyncio.to_thread(
+            analytics.build_analytics,
             service.response, service.symbol, snapshot.expiry, snapshot.underlying
         )
 
     @app.post("/api/strategy/payoff", response_model = schemas.PayoffOut)
     async def strategy_payoff(request : Request, body : schemas.PayoffIn) -> schemas.PayoffOut:
         service  = request.app.state.service
-        snapshot = _require_chain(service, body.expiry)
-        return analytics.payoff(
+        snapshot = await _require_chain(service, body.expiry)
+        return await asyncio.to_thread(
+            analytics.payoff,
             body.legs, snapshot.underlying, snapshot.expiry,
             lot_size = analytics.lot_size(service.symbol), lots = body.lots,
             rate = settings.rate, quotes = analytics.quote_lookup(snapshot)
@@ -126,15 +128,20 @@ def create_app(settings : AppSettings) -> FastAPI:
     @app.get("/api/suggestions", response_model = schemas.SuggestionsOut)
     async def suggestions(request : Request, expiry : str | None = None) -> schemas.SuggestionsOut:
         service  = request.app.state.service
-        snapshot = _require_chain(service, expiry)
-        analytic = analytics.build_analytics(
-            service.response, service.symbol, snapshot.expiry, snapshot.underlying
-        )
-        context = suggester.build_context(snapshot, analytic, rate = settings.rate)
-        ranked  = request.app.state.suggester.suggest(context)
+        snapshot = await _require_chain(service, expiry)
+        provider = request.app.state.suggester
+
+        def _compute() -> tuple:
+            analytic = analytics.build_analytics(
+                service.response, service.symbol, snapshot.expiry, snapshot.underlying
+            )
+            context = suggester.build_context(snapshot, analytic, rate = settings.rate)
+            return context.summary(), provider.suggest(context)
+
+        context_summary, ranked = await asyncio.to_thread(_compute)
         return schemas.SuggestionsOut(
             symbol = service.symbol, expiry = snapshot.expiry,
-            context = context.summary(), suggestions = ranked
+            context = context_summary, suggestions = ranked
         )
 
     # --------------------------- WebSocket ------------------------------ #

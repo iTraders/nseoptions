@@ -171,7 +171,7 @@ def max_pain(response : dict, expiry : str) -> tuple:
     items   = _legs_for_expiry(response, expiry)
     ce_oi   = {float(i["strikePrice"]) : _oi(i, "CE") for i in items}
     pe_oi   = {float(i["strikePrice"]) : _oi(i, "PE") for i in items}
-    strikes = sorted(ce_oi)
+    strikes = sorted(set(ce_oi) | set(pe_oi)) # ! union so PE-only strikes count
 
     if not strikes or (sum(ce_oi.values()) + sum(pe_oi.values())) == 0:
         return None, []
@@ -179,8 +179,8 @@ def max_pain(response : dict, expiry : str) -> tuple:
     losses = []
     for settle in strikes:
         loss = (
-            sum(ce_oi[k] * max(settle - k, 0.0) for k in strikes)
-            + sum(pe_oi[k] * max(k - settle, 0.0) for k in strikes)
+            sum(ce_oi.get(k, 0.0) * max(settle - k, 0.0) for k in strikes)
+            + sum(pe_oi.get(k, 0.0) * max(k - settle, 0.0) for k in strikes)
         )
         losses.append(schemas.StrikeLoss(strikePrice = settle, loss = round(loss, 2)))
 

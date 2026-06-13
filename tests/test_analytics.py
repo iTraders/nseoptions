@@ -38,6 +38,22 @@ def test_max_pain_minimizes_writer_loss(sample, expiry):
     assert min(losses, key = lambda point : point.loss).strikePrice == pain
 
 
+def test_max_pain_includes_pe_only_strikes():
+    # a strike quoted only on the PE side must still be a candidate + counted
+    response = {
+        "records": {
+            "data": [
+                {"strikePrice": 100, "expiryDate": "26-Jun-2025", "CE": {"openInterest": 0}, "PE": {"openInterest": 1000}},
+                {"strikePrice": 110, "expiryDate": "26-Jun-2025", "PE": {"openInterest": 5000}},
+                {"strikePrice": 120, "expiryDate": "26-Jun-2025", "CE": {"openInterest": 1000}},
+            ]
+        }
+    }
+    pain, losses = analytics.max_pain(response, "26-Jun-2025")
+    assert pain is not None
+    assert 110.0 in {point.strikePrice for point in losses}
+
+
 def test_oi_walls_support_below_resistance_above(sample, expiry):
     support, resistance = analytics.oi_walls(sample, expiry)
 
