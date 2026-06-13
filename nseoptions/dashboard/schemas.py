@@ -244,3 +244,43 @@ class SocketMessage(BaseModel):
     chain  : ChainOut | None = None
     state  : str | None = None
     detail : str | None = None
+
+
+class SymbolInfo(BaseModel):
+    """One selectable download symbol and its strike-price multiple."""
+
+    symbol   : str
+    multiple : int
+
+
+class SymbolsOut(BaseModel):
+    """The catalogue of selectable symbols served to the controls panel."""
+
+    symbols : list[SymbolInfo] = []
+    default : list[str] = []
+
+
+class FetchRequest(BaseModel):
+    """Request body for the ``Fetch Data`` control: the symbols to download."""
+
+    symbols : list[str] = []
+
+
+class WorkerStatus(BaseModel):
+    """Live status of a single ``(symbol, expiry)`` download worker."""
+
+    symbol         : str
+    expiry         : str
+    state          : Literal["starting", "ok", "error"] = "starting"
+    snapshots      : int = 0 # distinct nse timestamps processed by the worker
+    last_timestamp : str | None = None
+    detail         : str | None = None
+
+
+class FetchStatus(BaseModel):
+    """The aggregate status of the in-process asynchronous downloader."""
+
+    running    : bool = False
+    symbols    : list[str] = []
+    started_at : str | None = None
+    workers    : list[WorkerStatus] = []
