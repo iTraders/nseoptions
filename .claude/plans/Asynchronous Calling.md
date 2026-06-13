@@ -156,7 +156,7 @@ Argparse entrypoint + top-level async runner.
 | `--hostname` | str | required | PostgreSQL host |
 | `--database` | str | required | DB name |
 | `--username` | str | required | DB user |
-| `--password` | str | required | DB password |
+| `--password` | str | required | DB password — **do NOT accept on the CLI** (process listing / shell history exposure); use env var / `~/.pgpass` / `--password-file` / `getpass()`. See the Security section. |
 | `--port` | int | 5432 | PostgreSQL port |
 | `--symbols` | str… | DEFAULT_SYMBOLS | Override the index list |
 | `--interval` | int | 30 | Poll interval in seconds |
@@ -251,7 +251,11 @@ async def write_snapshot(pool, symbol: str, expiry: str, response: dict, model, 
 No changes required. `NSEOptionChain` and `processing` are already exported.
 
 ### `nseoptions/core.py`
-No changes. `asyncio.to_thread()` wraps the synchronous API; `core.py` is untouched.
+`asyncio.to_thread()` wraps the synchronous API (no async rewrite). The only edits are the
+security hardening landed on 2026-06-13 (see the Security section): `verify` now defaults to
+`True`; a streaming `__readcapped__` enforces a `MAX_RESPONSE_BYTES` (25 MB) cap on the chain
+and expiry fetches; those GETs set `allow_redirects=False`; and the chain response is
+shape-checked (`records`/`filtered` must be dicts, not merely present).
 
 ### `nseoptions/processing.py`
 No changes.
@@ -288,6 +292,53 @@ The application-layer check is the performance guard; the DB constraint is the c
 - Each `NSEOptionChain` instance has its own session (independent Akamai cookies). No
   session sharing across workers.
 - `--max-concurrent` is user-tunable if NSE tightens rate limits.
+
+---
+
+## Security
+
+An adversarially-verified security audit (2026-06-13) covered `download.py` and the
+`nseoptions` package. The threat model assumes a feasible MITM, because the corporate
+deployment routinely runs `--no-verify` on an SSL-intercepting network. Fixes landed in
+commit `4a9a1aa`; CLI argument validation and DB credential handling are intentionally
+deferred to the separate credentials/security development track.
+
+**Fixed (2026-06-13):**
+
+| Issue | CWE | Severity | Fix |
+|-------|-----|----------|-----|
+| Path traversal / arbitrary file write via upstream-controlled `records.timestamp` in the snapshot filename | CWE-22 / CWE-73 | High | `sanitizetimestamp` now parses+canonicalizes via `strptime` (rejects separators); `buildfilepath` refuses any filename containing a path separator; the worker skips the snapshot on a malformed timestamp |
+| TLS verification off by default for library callers | CWE-295 | Medium | `core.py` `verify` now defaults to `True`; shipped CLIs already pass `verify` explicitly so their behaviour is unchanged |
+| Oversized / decompression-bomb response (memory + disk DoS) | CWE-400 / CWE-409 | Medium | streaming `__readcapped__` rejects bodies past `MAX_RESPONSE_BYTES` (25 MB) before parse/persist |
+| Unbounded task creation from a hostile `expiryDates` list | CWE-770 | Medium | `discoverexpiries` validates each entry and caps the list at `MAX_EXPIRIES` (64) |
+| Payload validated by key-presence only | CWE-20 | Low | chain response shape-checked (`records`/`filtered` must be dicts) |
+| Redirects followed on an unverified channel | CWE-295-adj | Low | `allow_redirects=False` on the chain + expiry GETs (warm-up untouched) |
+
+**Required for the upcoming `cli.py` (credentials track), NOT a current code vuln:**
+
+- **Never accept the DB password on the CLI** (CWE-214/522): `--password` is visible in
+  `ps` / `wmic` / Task Manager and shell history for the life of the long-running service.
+  Use a `PGPASSWORD`/`NSEOPTIONS_DB_PASSWORD` env var, libpq `~/.pgpass`, a `--password-file`,
+  or `getpass()`. The verification example in this plan must not hard-code a password.
+- **Do not log the credential** (CWE-532): extract DB params before the pool-creation
+  boundary; never pass the raw `args` Namespace or a `postgresql://user:pass@host/db` DSN
+  into anything that logs; mask connection errors (host/db/user only).
+
+**Refuted by verification (not acted on):** suppressing the urllib3 `InsecureRequestWarning`
+was judged a non-vuln (Python shows that warning once per process anyway, and `--no-verify`
+is itself an explicit signal).
+
+**Deferred / residual:**
+
+- `--symbols` is not URL-encoded or allowlisted before going into the request URL and the
+  filename (CWE-88/918, Low) — operator-supplied, fixed host; folded into the credentials/
+  args-validation track. The `buildfilepath` separator check already blocks the on-disk
+  traversal vector for a malicious symbol.
+- `setconfig(file=...)` opens any path unchecked (Info, latent) — validate when/if a
+  config-file CLI flag is exposed.
+- `__readcapped__` bounds the buffered/parsed/persisted size but a gzip stream can still
+  transiently allocate during decompression; the cap stops the parse + disk amplification.
+- `urllib3==2.2.2` is stale — recommend bumping to `>=2.5` (confirm advisories independently).
 
 ---
 
@@ -331,7 +382,9 @@ Progress tracking for v1 MVP development. Check off items as they are completed.
 - [x] Worker resilience: transient + unexpected errors logged-and-retried; one-time setup isolated; graceful Ctrl+C cancel/teardown with a bounded per-fetch retry budget (`FETCH_WAITTIME`/`FETCH_MAXRETRIES`)
 - [x] Agent review pass applied (resilience + shutdown + DRY fixes)
 - [x] Verified: `py_compile`, `--help`, flake8 clean under the skill ruleset, and a live bounded smoke test (18 NIFTY expiries -> 18 distinct snapshots, clean cancellation without hang)
-- [ ] (deferred) DB integration: replace `writesnapshot` with `db.write_snapshot`; split into `cli.py` + `worker.py`
+- [x] Security audit (adversarially verified) + hardening landed (commit `4a9a1aa`): path-traversal, TLS-default, response-size cap, expiry cap, shape check, no-redirect (see the Security section)
+- [x] Re-tested after hardening: 13 deterministic security unit tests pass + live `--no-verify` run still discovers 18 expiries and writes 18 snapshots cleanly
+- [ ] (deferred to credentials track) DB integration: secure password handling (env/`.pgpass`), `--symbols` validation/encoding; replace `writesnapshot` with `db.write_snapshot`; split into `cli.py` + `worker.py`
 
 ### Phase 1: Project Setup
 - [ ] Create `pyproject.toml` at repo root with all build config and dependencies (commit: `feat(build): add pyproject.toml`)
