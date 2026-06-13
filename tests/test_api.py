@@ -49,6 +49,15 @@ def test_suggestions(client):
     assert len(body["suggestions"]) >= 1
 
 
+def test_history_endpoint_shape(client):
+    body = client.get(
+        "/api/history",
+        params = {"expiry" : "26-Jun-2025", "strike" : 23450, "leg" : "CE", "field" : "ltp"},
+    ).json()
+    assert body["strike"] == 23450.0 and body["leg"] == "CE" and body["field"] == "ltp"
+    assert isinstance(body["points"], list) # empty until the poller records ticks
+
+
 def test_websocket_snapshot(client):
     with client.websocket_connect("/ws?expiry=26-Jun-2025") as socket:
         message = socket.receive_json()

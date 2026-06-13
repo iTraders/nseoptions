@@ -20,5 +20,18 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        // Split heavy vendors into separately cacheable chunks.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (/recharts|d3-|react-smooth|victory-vroom/.test(id)) return "charts";
+          if (/react-dom|scheduler|\/react\//.test(id)) return "react";
+          if (/@tanstack|zustand/.test(id)) return "query";
+          return "vendor";
+        },
+      },
+    },
   },
 });
