@@ -179,3 +179,35 @@ export interface SocketMessage {
   state?: string | null;
   detail?: string | null;
 }
+
+export interface SymbolInfo {
+  symbol: string;
+  multiple: number;
+}
+
+export interface SymbolsOut {
+  symbols: SymbolInfo[];
+  default: string[];
+}
+
+export interface FetchRequest {
+  symbols: string[];
+}
+
+export type WorkerState = "starting" | "ok" | "error";
+
+export interface WorkerStatus {
+  symbol: string;
+  expiry: string;
+  state: WorkerState;
+  snapshots: number;
+  last_timestamp: string | null;
+  detail: string | null;
+}
+
+export interface FetchStatus {
+  running: boolean;
+  symbols: string[];
+  started_at: string | null;
+  workers: WorkerStatus[];
+}

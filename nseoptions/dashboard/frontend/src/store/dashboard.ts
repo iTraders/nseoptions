@@ -2,7 +2,8 @@
  * Client-only UI state (Zustand).
  *
  * Server state (chain / analytics / history) lives in TanStack Query; this
- * store only holds view selections and the in-progress strategy legs.
+ * store only holds view selections, the download selection and the
+ * in-progress strategy legs.
  */
 
 import { create } from "zustand";
@@ -20,12 +21,15 @@ interface DashboardState {
   selectedStrike?: number;
   heatMetric: HeatMetric;
   builderLegs: StrategyLeg[];
+  selectedSymbols: string[];
 
   setSymbol: (symbol: string) => void;
   setExpiry: (expiry: string) => void;
   setTab: (tab: DashboardTab) => void;
   setSelectedStrike: (strike: number | undefined) => void;
   setHeatMetric: (metric: HeatMetric) => void;
+  toggleSymbol: (symbol: string) => void;
+  setSelectedSymbols: (symbols: string[]) => void;
 
   addLeg: (leg: StrategyLeg) => void;
   updateLeg: (index: number, patch: Partial<StrategyLeg>) => void;
@@ -41,12 +45,20 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   selectedStrike: undefined,
   heatMetric: "pchangeinOpenInterest",
   builderLegs: [],
+  selectedSymbols: [],
 
   setSymbol: (symbol) => set({ symbol }),
   setExpiry: (expiry) => set({ expiry }),
   setTab: (tab) => set({ tab }),
   setSelectedStrike: (selectedStrike) => set({ selectedStrike }),
   setHeatMetric: (heatMetric) => set({ heatMetric }),
+  toggleSymbol: (symbol) =>
+    set((state) => ({
+      selectedSymbols: state.selectedSymbols.includes(symbol)
+        ? state.selectedSymbols.filter((value) => value !== symbol)
+        : [...state.selectedSymbols, symbol],
+    })),
+  setSelectedSymbols: (selectedSymbols) => set({ selectedSymbols }),
 
   addLeg: (leg) => set((state) => ({ builderLegs: [...state.builderLegs, leg] })),
   updateLeg: (index, patch) =>

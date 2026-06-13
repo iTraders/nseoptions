@@ -1,5 +1,7 @@
 import { Activity } from "lucide-react";
 
+import { FetchDataButton } from "@/components/controls/FetchDataButton";
+import { SymbolSelector } from "@/components/controls/SymbolSelector";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -46,6 +48,11 @@ export function Header({ meta, connection }: HeaderProps) {
       ) : null}
 
       <div className="ml-auto flex items-center gap-3">
+        <SymbolSelector />
+        <FetchDataButton />
+
+        <Separator orientation="vertical" className="h-6" />
+
         {expiries.length > 0 ? (
           <Select value={current} onValueChange={setExpiry}>
             <SelectTrigger className="h-8 w-[160px] font-mono text-xs">
