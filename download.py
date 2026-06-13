@@ -42,6 +42,7 @@ import datetime as dt
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from nseoptions import NSEOptionChain
+from nseoptions.processing import normalizeexpiry
 
 DEFAULT_SYMBOLS = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "FINNIFTY"]
 
@@ -50,6 +51,10 @@ DEFAULT_SYMBOLS = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "FINNIFTY"]
 # re-polls every `interval` regardless, so an individual fetch fails fast
 FETCH_WAITTIME = 5
 FETCH_MAXRETRIES = 3
+
+# ! cap expiries per symbol - NSE lists tens; a hostile/MITM response could
+# return a huge `expiryDates` list and inflate asyncio task allocation
+MAX_EXPIRIES = 64
 
 logger = logging.getLogger("nseoptions.download")
 
@@ -131,22 +136,28 @@ def enablesslbypass() -> None:
 
 def sanitizetimestamp(timestamp : str) -> str:
     """
-    Make an NSE Market Timestamp Safe for Use in a Filename
+    Validate and Canonicalize an NSE Market Timestamp for a Filename
 
-    The NSE market timestamp (example ``13-Jun-2026 12:33:49``) carries
-    a colon and a space, neither of which is safe across file systems.
-    The colons are stripped and the space is replaced with an
-    underscore, yielding ``13-Jun-2026_123349``.
+    The NSE market timestamp (example ``13-Jun-2026 12:33:49``) is parsed
+    against the known ``%d-%b-%Y %H:%M:%S`` format and re-emitted as a
+    filesystem-safe token (example ``13-Jun-2026_123349``). Parsing
+    (rather than a blind character replacement) both validates the value
+    and guarantees it can never carry a path separator, which matters
+    because the timestamp originates from the untrusted upstream payload.
 
     :type  timestamp: str
     :param timestamp: The raw ``records.timestamp`` value as reported by
         the NSE v3 option chain payload.
 
+    :raises ValueError: If ``timestamp`` does not conform to the NSE
+        market timestamp format ``%d-%b-%Y %H:%M:%S``.
+
     :rtype:  str
-    :return: A filesystem-safe rendering of the timestamp.
+    :return: A validated, filesystem-safe rendering of the timestamp.
     """
 
-    return timestamp.replace(":", "").replace(" ", "_")
+    parsed = dt.datetime.strptime(timestamp, "%d-%b-%Y %H:%M:%S")
+    return parsed.strftime("%d-%b-%Y_%H%M%S")
 
 
 def buildfilepath(
@@ -168,8 +179,9 @@ def buildfilepath(
     :param fetchdate: The fetch-date partition, formatted ``%Y-%m-%d``.
 
     :type  timestamp: str
-    :param timestamp: The raw NSE market timestamp; it is sanitized via
-        :func:`sanitizetimestamp` before being placed in the filename.
+    :param timestamp: The raw NSE market timestamp; it is validated and
+        canonicalized via :func:`sanitizetimestamp` before being placed
+        in the filename.
 
     :type  symbol: str
     :param symbol: The traded symbol, example ``NIFTY``.
@@ -178,11 +190,21 @@ def buildfilepath(
     :param expiry: The contract expiry in ``%d-%b-%Y`` form, example
         ``16-Jun-2026``.
 
+    :raises ValueError: If the timestamp is malformed, or if any path
+        component would introduce a directory separator (defence in
+        depth against path traversal via upstream-controlled values).
+
     :rtype:  str
     :return: The path of the JSON file to write.
     """
 
     filename = f"{sanitizetimestamp(timestamp)}-{symbol}-{expiry}.json"
+
+    # ! every path component must be a single name - a separator here would
+    # let an upstream-controlled value escape `outdir` (path traversal)
+    if os.sep in filename or (os.altsep and os.altsep in filename):
+        raise ValueError(f"unsafe path component in filename `{filename}`")
+
     return os.path.join(outdir, fetchdate, filename)
 
 
@@ -217,9 +239,12 @@ async def discoverexpiries(symbol : str, verify : bool) -> list:
 
     A throwaway :class:`nseoptions.core.NSEOptionChain` instance is
     configured and its blocking :meth:`expiries` call is dispatched to a
-    worker thread via :func:`asyncio.to_thread`. A ``None`` result (the
-    discovery falling through its internal retry loop) is normalised to
-    an empty list so the orchestrator can skip the symbol cleanly.
+    worker thread via :func:`asyncio.to_thread`. Because the returned
+    list is untrusted upstream data, each entry is validated against the
+    canonical ``%d-%b-%Y`` form (malformed entries are dropped) and the
+    count is capped at :data:`MAX_EXPIRIES`, so a hostile response cannot
+    inflate downstream task allocation. A ``None``/empty result yields an
+    empty list so the orchestrator can skip the symbol cleanly.
 
     :type  symbol: str
     :param symbol: The index symbol whose expiries are to be discovered.
@@ -228,21 +253,34 @@ async def discoverexpiries(symbol : str, verify : bool) -> list:
     :param verify: Whether to verify SSL certificates on the request.
 
     :rtype:  list
-    :return: The list of expiry strings (``%d-%b-%Y``), or an empty list
-        when none could be discovered.
+    :return: The validated, capped list of expiry strings (``%d-%b-%Y``),
+        or an empty list when none could be discovered.
     """
 
     api = NSEOptionChain(symbol, verify = verify)
 
     # ? `expiries()` configures the instance lazily, so an explicit
     # `setconfig()` here would only repeat that work
-    expiries = await asyncio.to_thread(api.expiries)
+    discovered = await asyncio.to_thread(api.expiries)
 
-    # ! `expiries()` returns a list or raises; the `or []` defends the
-    # empty-discovery case so the orchestrator can skip the symbol
-    expiries = expiries or []
+    # ! validate and cap the untrusted upstream list: drop malformed
+    # entries and bound the count so a hostile response cannot inflate
+    # downstream asyncio task allocation
+    expiries = []
+    for item in discovered or []:
+        try:
+            expiries.append(normalizeexpiry(item))
+        except (ValueError, TypeError):
+            logger.warning("%s : ignoring malformed expiry %r", symbol, item)
+
+    if len(expiries) > MAX_EXPIRIES:
+        logger.warning(
+            "%s : %d expiries exceed cap %d, truncating",
+            symbol, len(expiries), MAX_EXPIRIES
+        )
+        expiries = expiries[:MAX_EXPIRIES]
+
     logger.info("%s : discovered %d expiries", symbol, len(expiries))
-
     return expiries
 
 
@@ -321,13 +359,20 @@ async def symbol_worker(
                 # ! recompute the date every cycle so a service running
                 # past midnight rolls into the new day's directory
                 fetchdate = dt.datetime.now().strftime("%Y-%m-%d")
-                filepath = buildfilepath(
-                    outdir, fetchdate, timestamp, symbol, expiry
-                )
-                await asyncio.to_thread(writesnapshot, response, filepath)
+                try:
+                    filepath = buildfilepath(
+                        outdir, fetchdate, timestamp, symbol, expiry
+                    )
+                except ValueError as err:
+                    logger.warning(
+                        "[%s/%s] unsafe/invalid timestamp, skipped - %s",
+                        symbol, expiry, err
+                    )
+                else:
+                    await asyncio.to_thread(writesnapshot, response, filepath)
 
-                last_timestamp = timestamp
-                logger.info("[%s/%s] saved %s", symbol, expiry, filepath)
+                    last_timestamp = timestamp
+                    logger.info("[%s/%s] saved %s", symbol, expiry, filepath)
             else:
                 logger.debug(
                     "[%s/%s] unchanged at %s, skipped",

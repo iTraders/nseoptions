@@ -15,6 +15,7 @@ a traded symbol (index/stock) from the NSE India public API.
     :meth:`NSEOptionChain.setexpiry` before fetching the chain.
 """
 
+import json
 import time
 import datetime as dt
 
@@ -25,6 +26,11 @@ from tqdm import tqdm as TQ
 
 from nseoptions import CONFIG
 from nseoptions.processing import normalizeexpiry
+
+# ! hard cap on the (decompressed) response body the client will buffer -
+# option chain payloads are well under a few MB; this bounds the memory and
+# disk damage from a hostile or oversized response (e.g. a decompression bomb)
+MAX_RESPONSE_BYTES = 25 * 1024 * 1024
 
 
 class NSEOptionChain:
@@ -74,7 +80,8 @@ class NSEOptionChain:
         * **verify** (*bool*) - SSL certificate validation to get the
           data from the internet. Always recommended to be True, but
           in case of legacy/restricted systems this option comes in
-          handy. Defaults to False.
+          handy. Defaults to True (verification on); pass ``verify =
+          False`` only on a trusted or SSL-intercepting network.
 
         * **timeout** (*int*) - Per-request timeout (in seconds) for
           every GET call to the NSE India website, since the website
@@ -91,7 +98,7 @@ class NSEOptionChain:
         self.expiry = normalizeexpiry(expiry) if expiry else None
 
         # keyword arguments parsed from cli/object initialization
-        self.verify = kwargs.get("verify", False)
+        self.verify = kwargs.get("verify", True)
         self.timeout = kwargs.get("timeout", 15)
 
         # ? session is created lazily by `__newsession__()` on first fetch
@@ -145,13 +152,21 @@ class NSEOptionChain:
                     self.NSE_API_URI,
                     headers = self.URI_HEADER,
                     timeout = self.timeout,
-                    verify = self.verify
+                    verify = self.verify,
+                    allow_redirects = False,
+                    stream = True
                 )
                 session_response.raise_for_status()
-                response = session_response.json()
+                response = self.__readcapped__(session_response)
 
-                # ? sanity check the payload before returning to caller
-                if "records" not in response or "filtered" not in response:
+                # ? validate the shape, not merely key presence - under a
+                # bypassed-TLS MITM the payload is otherwise trusted as-is
+                valid = (
+                    isinstance(response, dict)
+                    and isinstance(response.get("records"), dict)
+                    and isinstance(response.get("filtered"), dict)
+                )
+                if not valid:
                     raise ValueError("malformed v3 response, missing records/filtered")
 
                 return response
@@ -331,10 +346,12 @@ class NSEOptionChain:
                 response = self.session.get(
                     self.NSE_CONTRACT_URI,
                     timeout = self.timeout,
-                    verify = self.verify
+                    verify = self.verify,
+                    allow_redirects = False,
+                    stream = True
                 )
                 response.raise_for_status()
-                return response.json()["expiryDates"]
+                return self.__readcapped__(response)["expiryDates"]
             except Exception:
                 if attempt: # ? second consecutive failure is propagated
                     raise
@@ -342,6 +359,40 @@ class NSEOptionChain:
                 # ! discard the stale/blocked session so the next iteration
                 # re-warms it inside the try, retrying a warm-up failure too
                 self.session = None
+
+
+    def __readcapped__(self, session_response : requests.Response) -> dict:
+        """
+        Stream and JSON-Decode a Response Body Under a Hard Size Cap
+
+        The response is consumed incrementally (with transfer/content
+        decoding applied) and the running total is checked against
+        :data:`MAX_RESPONSE_BYTES`, so an oversized or maliciously
+        compressed payload is rejected before it is fully buffered,
+        parsed, or persisted by a caller.
+
+        :type  session_response: requests.Response
+        :param session_response: A streaming response (``stream = True``)
+            whose body is to be read and JSON-decoded.
+
+        :raises ValueError: If the decoded body exceeds
+            :data:`MAX_RESPONSE_BYTES`.
+
+        :rtype:  dict
+        :return: The JSON-decoded response body.
+        """
+
+        chunks, total = [], 0
+        for chunk in session_response.iter_content(chunk_size = 65536):
+            total += len(chunk)
+            if total > MAX_RESPONSE_BYTES:
+                raise ValueError(
+                    f"response body exceeds the {MAX_RESPONSE_BYTES} byte cap"
+                )
+
+            chunks.append(chunk)
+
+        return json.loads(b"".join(chunks))
 
 
     def __newsession__(self) -> None:
