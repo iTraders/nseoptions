@@ -169,7 +169,9 @@ if __name__ == "__main__":
             opchain = model.makeclean(verbose = True)
 
             writefile(file = filename, opchain = opchain, model = model)
-            writejson(response, symbol, timestamp = model.timestamp, outdir = responsedir)
+            writejson(
+                response, symbol, timestamp = model.timestamp, outdir = responsedir
+            )
 
             _ = [time.sleep(1) for _ in TQ(range(30), desc = "Waiting to Refresh...")]
     except KeyboardInterrupt:
