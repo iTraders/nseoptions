@@ -20,6 +20,33 @@ definition is owned by a separate project — this plan specifies only the write
 
 ---
 
+## Development Guidelines
+
+### Code Format & Skill Requirement
+
+**All Python code must follow the `/python-code-format` skill.** This ensures consistency
+across all new files (`cli.py`, `worker.py`, `db.py`) and any modifications to existing
+modules. Always read the full file before writing or modifying any Python code.
+
+### Agent Deployment
+
+**Deploy all Python coding agents from the global directory** for this project. Use the
+`python-code-format` skill when creating or editing Python files to ensure adherence to
+the project's formatting standards.
+
+### Git Commit Strategy
+
+Create **detailed, atomic git commits at each important interval/step**:
+- One commit per file creation (with meaningful `feat:` or `chore:` prefix)
+- One commit after completing a logical feature block (e.g., "all CLI args parsed and validated")
+- One commit after each smoke-test cycle
+- Commit messages should reference the task/issue being addressed and summarize what changed
+- Include `Co-Authored-By` footer for transparency
+
+This allows graceful tracking and cherry-picking of changes if needed.
+
+---
+
 ## Architecture Overview
 
 ```
@@ -274,6 +301,53 @@ The application-layer check is the performance guard; the DB constraint is the c
 | Market-hours awareness | Service can run 24/7; NSE returns stale data outside hours |
 | `tests/` test suite | Explicitly deferred per `MIGRATION_COMPLETE.md` |
 | `--discover` flag for full F&O universe | Post-v1; needs NSE symbol-list endpoint research |
+
+---
+
+## Implementation Checklist
+
+Progress tracking for v1 MVP development. Check off items as they are completed.
+
+### Phase 1: Project Setup
+- [ ] Create `pyproject.toml` at repo root with all build config and dependencies (commit: `feat(build): add pyproject.toml`)
+- [ ] Verify `pip install -e .` works and `nseoptions --help` is accessible
+
+### Phase 2: CLI Module (`nseoptions/cli.py`)
+- [ ] Write `cli.py` with argparse setup for all required flags (hostname, database, username, password, etc.)
+- [ ] Implement `main()` entrypoint function
+- [ ] Implement `run_service(args)` async coroutine with startup/shutdown logic
+- [ ] Add SSL warning logic (wrap existing code from `main.py`)
+- [ ] Add startup summary logging: `"Started N workers across M symbols"`
+- [ ] Test graceful KeyboardInterrupt handling and pool cleanup (commit: `feat(cli): implement argparse and async runner`)
+
+### Phase 3: Database Module (`nseoptions/db.py`)
+- [ ] Write `db.py` with `create_pool()` and `write_snapshot()` stub functions
+- [ ] Document DB contract in `write_snapshot()` docstring (field names, types, constraints)
+- [ ] Ensure `write_snapshot()` raises `NotImplementedError` with clear message (commit: `feat(db): add writer stub with contract definition`)
+
+### Phase 4: Worker Module (`nseoptions/worker.py`)
+- [ ] Write `worker.py` with `async def symbol_worker(...)` coroutine
+- [ ] Implement NSEOptionChain initialization and setconfig/setexpiry calls
+- [ ] Implement dedup check logic (compare `response["records"]["timestamp"]`)
+- [ ] Add error handling: `ValueError`, `ConnectionError` → log and retry
+- [ ] Integrate `OptionChainProcessing.makeclean()` call
+- [ ] Integrate `db.write_snapshot()` call
+- [ ] Implement graceful loop with `asyncio.sleep(interval)` (commit: `feat(worker): implement per-expiry async loop with dedup`)
+
+### Phase 5: Integration & Testing
+- [ ] Update imports in `nseoptions/__init__.py` if needed (likely no changes)
+- [ ] Install package in editable mode: `pip install -e .`
+- [ ] Run smoke test with `--symbols NIFTY --interval 10 --max-concurrent 1 --no-verify`
+- [ ] Verify startup output: SSL warning, expiry fetch, worker count summary
+- [ ] Verify graceful shutdown on CTRL+C (no hanging tasks)
+- [ ] Verify dedup logic: same timestamp → skip DB write (monitor logs)
+- [ ] Create integration test commit: `test(smoke): verify startup, expiry fetch, dedup, graceful shutdown`
+
+### Phase 6: Documentation & Polish
+- [ ] Verify all docstrings match code behavior
+- [ ] Add inline comments only where WHY is non-obvious (per project guidelines)
+- [ ] Verify error log messages are actionable (e.g., `[NIFTY/16-Jun-2026] Connection error: ...`)
+- [ ] Final polish commit: `docs: finalize docstrings and inline comments`
 
 ---
 
